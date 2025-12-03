@@ -1,0 +1,6 @@
+# 将wscript⽂件导⼊到ns-allinone-3.34/ns-3.34/contrib/dash/examples⽬录下
+# -*- Mode: python; py-indent-offset: 4; indent-tabs-mode: nil; coding: utf-8;
+
+def build(bld):
+	obj = bld.create_ns3_program('test', ['dash', 'internet','applications', 'point-to-point'])
+	obj.source = 'test-old.cc'
