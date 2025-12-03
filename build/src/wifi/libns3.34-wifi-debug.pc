@@ -1,0 +1,10 @@
+prefix=/usr/local
+libdir=/usr/local/lib
+includedir=/usr/local/include/ns3.34
+
+Name: libns3-wifi
+Description: ns-3 module ns3-wifi
+Version: 3.34
+Libs: -L${libdir} -Wl,-Bdynamic -lns3.34-wifi-debug
+Cflags: -I${includedir}
+Requires: libns3.34-network-debug libns3.34-propagation-debug libns3.34-energy-debug libns3.34-spectrum-debug libns3.34-antenna-debug libns3.34-mobility-debug
