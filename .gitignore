@@ -1,0 +1,33 @@
+# build files
+build/
+build/*
+
+# waf build artifacts
+*.o
+*.pyc
+*.pyo
+*.so
+*.lo
+*.la
+
+# waf lock files
+.lock-waf*
+waf-tools/.lock-wscript
+
+# temporary files
+*.swp
+*.swo
+*~
+
+# logs
+*.log
+
+# Python cache
+__pycache__/
+
+# system files
+.DS_Store
+
+# ctags
+tags
+
