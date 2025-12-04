@@ -61,10 +61,11 @@ TypeId TcpStreamServer::GetTypeId(void) {
           .SetGroupName("Applications")       // 分组名称
           .AddConstructor<TcpStreamServer>()  // 添加默认构造函数
           // 添加属性，指定服务器监听端口
-          .AddAttribute("Port", "Port on which we listen for incoming packets.",
-                        UintegerValue(9),                                // 默认端口 9
-                        MakeUintegerAccessor(&TcpStreamServer::m_port),  // 绑定成员变量
-                        MakeUintegerChecker<uint16_t>());                // 类型检查
+          .AddAttribute(
+              "Port", "Port on which we listen for incoming packets.",
+              UintegerValue(9),                                // 默认端口 9
+              MakeUintegerAccessor(&TcpStreamServer::m_port),  // 绑定成员变量
+              MakeUintegerChecker<uint16_t>());                // 类型检查
   return tid;
 }
 
@@ -92,30 +93,33 @@ void TcpStreamServer::StartApplication(void) {
 
   // 如果 IPv4 套接字尚未创建
   if (m_socket == 0) {
-    TypeId tid = TypeId::LookupByName("ns3::TcpSocketFactory");  // 获取 TCP 套接字工厂
-    m_socket = Socket::CreateSocket(GetNode(), tid);             // 创建套接字
-    InetSocketAddress local =
-        InetSocketAddress(Ipv4Address::GetAny(), m_port);  // 绑定任意 IPv4 地址和端口
-    m_socket->Bind(local);                                 // 绑定套接字
-    m_socket->Listen();                                    // 开始监听
+    TypeId tid =
+        TypeId::LookupByName("ns3::TcpSocketFactory");  // 获取 TCP 套接字工厂
+    m_socket = Socket::CreateSocket(GetNode(), tid);    // 创建套接字
+    InetSocketAddress local = InetSocketAddress(
+        Ipv4Address::GetAny(), m_port);  // 绑定任意 IPv4 地址和端口
+    m_socket->Bind(local);               // 绑定套接字
+    m_socket->Listen();                  // 开始监听
   }
 
   // 如果 IPv6 套接字尚未创建
   if (m_socket6 == 0) {
-    TypeId tid = TypeId::LookupByName("ns3::TcpSocketFactory");  // TCP 套接字工厂
-    m_socket6 = Socket::CreateSocket(GetNode(), tid);            // 创建套接字
-    Inet6SocketAddress local6 =
-        Inet6SocketAddress(Ipv6Address::GetAny(), m_port);  // 绑定任意 IPv6 地址
-    m_socket6->Bind(local6);                                // 绑定套接字
+    TypeId tid =
+        TypeId::LookupByName("ns3::TcpSocketFactory");  // TCP 套接字工厂
+    m_socket6 = Socket::CreateSocket(GetNode(), tid);   // 创建套接字
+    Inet6SocketAddress local6 = Inet6SocketAddress(
+        Ipv6Address::GetAny(), m_port);  // 绑定任意 IPv6 地址
+    m_socket6->Bind(local6);             // 绑定套接字
     m_socket->Listen();  // 开始监听（注意：这里写成 m_socket->Listen()
                          // 是一个小错误，应该是 m_socket6->Listen()）
   }
 
   // 设置接收连接请求回调
-  m_socket->SetAcceptCallback(MakeNullCallback<bool, Ptr<Socket>,
-                                               const Address &>(),  // 过滤回调，暂时不检查
-                              MakeCallback(&TcpStreamServer::HandleAccept,
-                                           this));  // 成功时调用 HandleAccept
+  m_socket->SetAcceptCallback(
+      MakeNullCallback<bool, Ptr<Socket>,
+                       const Address &>(),  // 过滤回调，暂时不检查
+      MakeCallback(&TcpStreamServer::HandleAccept,
+                   this));  // 成功时调用 HandleAccept
 
   // 设置套接字关闭相关回调
   m_socket->SetCloseCallbacks(
@@ -129,14 +133,16 @@ void TcpStreamServer::StopApplication() {
 
   // 如果 IPv4 套接字存在
   if (m_socket != 0) {
-    m_socket->Close();                                                  // 关闭套接字
-    m_socket->SetRecvCallback(MakeNullCallback<void, Ptr<Socket> >());  // 清空接收回调
+    m_socket->Close();  // 关闭套接字
+    m_socket->SetRecvCallback(
+        MakeNullCallback<void, Ptr<Socket> >());  // 清空接收回调
   }
 
   // 如果 IPv6 套接字存在
   if (m_socket6 != 0) {
-    m_socket6->Close();                                                  // 关闭套接字
-    m_socket6->SetRecvCallback(MakeNullCallback<void, Ptr<Socket> >());  // 清空接收回调
+    m_socket6->Close();  // 关闭套接字
+    m_socket6->SetRecvCallback(
+        MakeNullCallback<void, Ptr<Socket> >());  // 清空接收回调
   }
 }
 
@@ -149,12 +155,14 @@ void TcpStreamServer::HandleRead(Ptr<Socket> socket) {
 
   packet = socket->RecvFrom(from);  // 从套接字接收数据，并获取源地址
 
-  int64_t packetSizeToReturn = GetCommand(packet);  // 解析数据包命令，返回要发送的字节数
+  int64_t packetSizeToReturn =
+      GetCommand(packet);  // 解析数据包命令，返回要发送的字节数
 
   // 为该客户端初始化回调数据
-  m_callbackData[from].currentTxBytes = 0;                       // 已发送字节数清零
-  m_callbackData[from].packetSizeToReturn = packetSizeToReturn;  // 设置要发送的字节数
-  m_callbackData[from].send = true;                              // 标记为需要发送
+  m_callbackData[from].currentTxBytes = 0;  // 已发送字节数清零
+  m_callbackData[from].packetSizeToReturn =
+      packetSizeToReturn;            // 设置要发送的字节数
+  m_callbackData[from].send = true;  // 标记为需要发送
 
   HandleSend(socket, socket->GetTxAvailable());  // 尝试发送数据
 }
@@ -165,7 +173,8 @@ void TcpStreamServer::HandleSend(Ptr<Socket> socket, uint32_t txSpace) {
   socket->GetPeerName(from);  // 获取连接客户端地址
 
   // 检查是否已经发送完数据
-  if (m_callbackData[from].currentTxBytes == m_callbackData[from].packetSizeToReturn) {
+  if (m_callbackData[from].currentTxBytes ==
+      m_callbackData[from].packetSizeToReturn) {
     m_callbackData[from].currentTxBytes = 0;      // 重置已发送字节数
     m_callbackData[from].packetSizeToReturn = 0;  // 重置要发送字节数
     m_callbackData[from].send = false;            // 标记不再发送
@@ -175,9 +184,10 @@ void TcpStreamServer::HandleSend(Ptr<Socket> socket, uint32_t txSpace) {
   // 如果发送缓冲区有空间并且标记为发送
   if (socket->GetTxAvailable() > 0 && m_callbackData[from].send) {
     int32_t toSend;
-    toSend = std::min(socket->GetTxAvailable(),
-                      m_callbackData[from].packetSizeToReturn -
-                          m_callbackData[from].currentTxBytes);  // 计算实际可发送的字节数
+    toSend = std::min(
+        socket->GetTxAvailable(),
+        m_callbackData[from].packetSizeToReturn -
+            m_callbackData[from].currentTxBytes);  // 计算实际可发送的字节数
 
     Ptr<Packet> packet = Create<Packet>(toSend);  // 创建数据包
     int amountSent = socket->Send(packet, 0);     // 发送数据
@@ -201,8 +211,10 @@ void TcpStreamServer::HandleAccept(Ptr<Socket> s, const Address &from) {
   m_callbackData[from] = cbd;          // 存储回调数据
   m_connectedClients.push_back(from);  // 添加到已连接客户端列表
 
-  s->SetRecvCallback(MakeCallback(&TcpStreamServer::HandleRead, this));  // 设置接收回调
-  s->SetSendCallback(MakeCallback(&TcpStreamServer::HandleSend, this));  // 设置发送回调
+  s->SetRecvCallback(
+      MakeCallback(&TcpStreamServer::HandleRead, this));  // 设置接收回调
+  s->SetSendCallback(
+      MakeCallback(&TcpStreamServer::HandleSend, this));  // 设置发送回调
 }
 
 // 处理客户端关闭连接

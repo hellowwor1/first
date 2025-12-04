@@ -86,15 +86,17 @@ class MultiTcpAvStreamServer : public Application {
   virtual void StopApplication(void);   //!< 停止应用程序
 
   /**
-   * \brief 处理收到的数据包
+   * \brief 处理收到的数据包，并将发送回调设置为 HandleSend
    *
    * 解析客户端请求，获取请求的字节数和流类型
+   * 收到的数据包内容通过GetCommand(Ptr<Packet>packet)反序列化。
+   * 如果数据包内容是一个整数字符串n，则服务器将返回 n 个字节给发送方。
    * \param socket 接收到数据包的套接字
    */
   void HandleRead(Ptr<Socket> socket);
 
   /**
-   * \brief 向客户端发送数据
+   * \brief 向连接到 socket 的客户端发送 packetSizeToReturn 字节
    *
    * 根据客户端请求的字节数发送数据，支持流式传输
    * \param socket 发送数据的套接字
@@ -142,24 +144,18 @@ class MultiTcpAvStreamServer : public Application {
   /**
    * \brief 客户端流数据映射
    *
-   * 键：客户端地址 + 流类型（用于区分同一客户端的视频和音频连接）
+   * 键：客户端 ip+port
    * 值：对应的回调数据结构
    */
-  std::map<std::string, MultiTcpAvCallbackData> m_callbackDataMap;
+  std::map<Address, MultiTcpAvCallbackData> m_callbackDataMap;
 
   /**
    * \brief 已连接客户端列表
    *
-   * 存储客户端地址 + 流类型的组合键
+   * Address 值的表现形式为："ip:port"
+   * 可以通过port轻松分辨是请求音频资源还是视频资源
    */
-  std::vector<std::string> m_connectedClients;
-
-  /**
-   * \brief 套接字到流类型的映射
-   *
-   * 用于根据套接字快速获取对应的流类型
-   */
-  std::map<Ptr<Socket>, std::string> m_socketStreamMap;
+  std::vector<Address> m_connectedClients;
 };
 
 }  // namespace ns3
