@@ -66,12 +66,12 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event) {
     // 发送两个流的下载请求
     if (BothStreamsConnected()) {  // 确保两个流都已连接
       // 发送视频段请求
-      Send(m_videoStream.videoInfo.segmentSize.at(m_videoStream.currentRepIndex)
+      Send(m_videoStream.m_video.segmentSize.at(m_videoStream.currentRepIndex)
                .at(m_videoStream.segmentCounter),
            VIDEO_STREAM);
 
       // 发送音频段请求
-      Send(m_audioStream.videoInfo.segmentSize.at(m_audioStream.currentRepIndex)
+      Send(m_audioStream.m_video.segmentSize.at(m_audioStream.currentRepIndex)
                .at(m_audioStream.segmentCounter),
            AUDIO_STREAM);
 
@@ -97,10 +97,10 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event) {
       state = downloadingPlaying;  // 切换到下载+播放状态
 
       // 发送两个流的下一段请求
-      Send(m_videoStream.videoInfo.segmentSize.at(m_videoStream.currentRepIndex)
+      Send(m_videoStream.m_video.segmentSize.at(m_videoStream.currentRepIndex)
                .at(m_videoStream.segmentCounter),
            VIDEO_STREAM);
-      Send(m_audioStream.videoInfo.segmentSize.at(m_audioStream.currentRepIndex)
+      Send(m_audioStream.m_video.segmentSize.at(m_audioStream.currentRepIndex)
                .at(m_audioStream.segmentCounter),
            AUDIO_STREAM);
     } else {
@@ -142,10 +142,10 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event) {
         }
         // 还有段需要下载，继续下载
         else {
-          Send(m_videoStream.videoInfo.segmentSize.at(m_videoStream.currentRepIndex)
+          Send(m_videoStream.m_video.segmentSize.at(m_videoStream.currentRepIndex)
                    .at(m_videoStream.segmentCounter),
                VIDEO_STREAM);
-          Send(m_audioStream.videoInfo.segmentSize.at(m_audioStream.currentRepIndex)
+          Send(m_audioStream.m_video.segmentSize.at(m_audioStream.currentRepIndex)
                    .at(m_audioStream.segmentCounter),
                AUDIO_STREAM);
         }
@@ -168,10 +168,10 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event) {
     if (event == irdFinished) {    // 延迟下载完成事件
       state = downloadingPlaying;  // 切回下载+播放状态
       // 发送两个流的下载请求
-      Send(m_videoStream.videoInfo.segmentSize.at(m_videoStream.currentRepIndex)
+      Send(m_videoStream.m_video.segmentSize.at(m_videoStream.currentRepIndex)
                .at(m_videoStream.segmentCounter),
            VIDEO_STREAM);
-      Send(m_audioStream.videoInfo.segmentSize.at(m_audioStream.currentRepIndex)
+      Send(m_audioStream.m_video.segmentSize.at(m_audioStream.currentRepIndex)
                .at(m_audioStream.segmentCounter),
            AUDIO_STREAM);
     } else if (event == playbackFinished &&
@@ -202,33 +202,37 @@ TypeId MultiTcpAvStreamClient::GetTypeId(void) {
           // 视频服务器地址属性
           .AddAttribute("VideoRemoteAddress", "The destination address of the video server",
                         AddressValue(),  // 默认值为空
-                        MakeAddressAccessor(&MultiTcpAvStreamClient::m_videoStream.peerAddress),
+                        MakeAddressAccessor(&MultiTcpAvStreamClient::GetVideoRemoteAddress,
+                                            &MultiTcpAvStreamClient::SetVideoRemoteAddress),
                         MakeAddressChecker())
 
           // 视频服务器端口属性
           .AddAttribute("VideoRemotePort", "The destination port of the video server",
                         UintegerValue(10000),  // 默认视频端口10000
-                        MakeUintegerAccessor(&MultiTcpAvStreamClient::m_videoStream.peerPort),
+                        MakeUintegerAccessor(&MultiTcpAvStreamClient::GetVideoRemotePort,
+                                             &MultiTcpAvStreamClient::SetVideoRemotePort),
                         MakeUintegerChecker<uint16_t>())
 
           // 音频服务器地址属性
           .AddAttribute("AudioRemoteAddress", "The destination address of the audio server",
                         AddressValue(),  // 默认值为空
-                        MakeAddressAccessor(&MultiTcpAvStreamClient::m_audioStream.peerAddress),
+                        MakeAddressAccessor(&MultiTcpAvStreamClient::GetAudioRemoteAddress,
+                                            &MultiTcpAvStreamClient::SetAudioRemoteAddress),
                         MakeAddressChecker())
 
           // 音频服务器端口属性
           .AddAttribute("AudioRemotePort", "The destination port of the audio server",
                         UintegerValue(10001),  // 默认音频端口10001
-                        MakeUintegerAccessor(&MultiTcpAvStreamClient::m_audioStream.peerPort),
+                        MakeUintegerAccessor(&MultiTcpAvStreamClient::GetAudioRemotePort,
+                                             &MultiTcpAvStreamClient::SetAudioRemotePort),
                         MakeUintegerChecker<uint16_t>())
 
           // 段持续时间属性
-          .AddAttribute(
-              "SegmentDuration", "The duration of a segment in microseconds",
-              UintegerValue(2000000),  // 默认2秒
-              MakeUintegerAccessor(&MultiTcpAvStreamClient::m_videoStream.segmentDuration),
-              MakeUintegerChecker<uint64_t>())
+          .AddAttribute("SegmentDuration", "The duration of a segment in microseconds",
+                        UintegerValue(2000000),  // 默认2秒
+                        MakeUintegerAccessor(&MultiTcpAvStreamClient::GetSegmentDuration,
+                                             &MultiTcpAvStreamClient::SetSegmentDuration),
+                        MakeUintegerChecker<uint64_t>())
 
           // 视频段大小文件路径属性
           .AddAttribute("VideoSegmentSizeFilePath",
@@ -328,29 +332,29 @@ void MultiTcpAvStreamClient::Initialise(std::string algorithm, uint16_t clientId
   }
 
   // 设置最后一个段索引
-  m_videoStream.lastSegmentIndex = (int64_t)m_videoStream.videoInfo.segmentSize.at(0).size() - 1;
-  m_audioStream.lastSegmentIndex = (int64_t)m_audioStream.videoInfo.segmentSize.at(0).size() - 1;
+  m_videoStream.lastSegmentIndex = (int64_t)m_videoStream.m_video.segmentSize.at(0).size() - 1;
+  m_audioStream.lastSegmentIndex = (int64_t)m_audioStream.m_video.segmentSize.at(0).size() - 1;
 
   // 设置最大码率索引
-  m_videoStream.highestRepIndex = m_videoStream.videoInfo.averageBitrate.size() - 1;
-  m_audioStream.highestRepIndex = m_audioStream.videoInfo.averageBitrate.size() - 1;
+  m_videoStream.highestRepIndex = m_videoStream.m_video.averageBitrate.size() - 1;
+  m_audioStream.highestRepIndex = m_audioStream.m_video.averageBitrate.size() - 1;
 
   // 为两个流创建自适应算法对象
   if (algorithm == "tobasco") {
-    m_videoStream.algo = new TobascoAlgorithm(m_videoStream.videoInfo, m_videoStream.playbackData,
-                                              m_videoStream.bufferData, m_videoStream.throughput);
-    m_audioStream.algo = new TobascoAlgorithm(m_audioStream.videoInfo, m_audioStream.playbackData,
-                                              m_audioStream.bufferData, m_audioStream.throughput);
+    m_videoStream.algo = new TobascoAlgorithm(m_videoStream.m_video, m_videoStream.m_playback,
+                                              m_videoStream.m_buffer, m_videoStream.m_throughput);
+    m_audioStream.algo = new TobascoAlgorithm(m_audioStream.m_video, m_audioStream.m_playback,
+                                              m_audioStream.m_buffer, m_audioStream.m_throughput);
   } else if (algorithm == "panda") {
-    m_videoStream.algo = new PandaAlgorithm(m_videoStream.videoInfo, m_videoStream.playbackData,
-                                            m_videoStream.bufferData, m_videoStream.throughput);
-    m_audioStream.algo = new PandaAlgorithm(m_audioStream.videoInfo, m_audioStream.playbackData,
-                                            m_audioStream.bufferData, m_audioStream.throughput);
+    m_videoStream.algo = new PandaAlgorithm(m_videoStream.m_video, m_videoStream.m_playback,
+                                            m_videoStream.m_buffer, m_videoStream.m_throughput);
+    m_audioStream.algo = new PandaAlgorithm(m_audioStream.m_video, m_audioStream.m_playback,
+                                            m_audioStream.m_buffer, m_audioStream.m_throughput);
   } else if (algorithm == "festive") {
-    m_videoStream.algo = new FestiveAlgorithm(m_videoStream.videoInfo, m_videoStream.playbackData,
-                                              m_videoStream.bufferData, m_videoStream.throughput);
-    m_audioStream.algo = new FestiveAlgorithm(m_audioStream.videoInfo, m_audioStream.playbackData,
-                                              m_audioStream.bufferData, m_audioStream.throughput);
+    m_videoStream.algo = new FestiveAlgorithm(m_videoStream.m_video, m_videoStream.m_playback,
+                                              m_videoStream.m_buffer, m_videoStream.m_throughput);
+    m_audioStream.algo = new FestiveAlgorithm(m_audioStream.m_video, m_audioStream.m_playback,
+                                              m_audioStream.m_buffer, m_audioStream.m_throughput);
   } else {
     NS_LOG_ERROR("Invalid algorithm name entered. Terminating.");
     StopApplication();
@@ -404,7 +408,7 @@ void MultiTcpAvStreamClient::RequestRepIndex(StreamType streamType) {
                 "Algorithm returned representation index higher than maximum");
 
   // 保存播放序列中的码率索引
-  streamData->playbackData.playbackIndex.push_back(answer.nextRepIndex);
+  streamData->m_playback.playbackIndex.push_back(answer.nextRepIndex);
 
   // 更新播放延迟（取两个流中的最大值）
   m_bDelay = std::max(m_bDelay, answer.nextDownloadDelay);
@@ -465,7 +469,7 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
     streamData->bytesReceived += packetSize;
 
     // 获取当前请求的段大小
-    int64_t expectedSize = streamData->videoInfo.segmentSize.at(streamData->currentRepIndex)
+    int64_t expectedSize = streamData->m_video.segmentSize.at(streamData->currentRepIndex)
                                .at(streamData->segmentCounter);
 
     // 检查是否已接收完整段
@@ -528,32 +532,33 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
   streamData->transmissionEndReceivingSegment = Simulator::Now().GetMicroSeconds();
 
   // 将接收完成时间存入缓冲时间记录数组
-  streamData->bufferData.timeNow.push_back(streamData->transmissionEndReceivingSegment);
+  streamData->m_buffer.timeNow.push_back(streamData->transmissionEndReceivingSegment);
 
   // 处理缓冲区等级计算
   if (streamData->segmentCounter > 0) {
     // 如果不是第一段，计算旧缓冲量
-    streamData->bufferData.bufferLevelOld.push_back(
-        std::max(streamData->bufferData.bufferLevelNew.back() -
+    streamData->m_buffer.bufferLevelOld.push_back(
+        std::max(streamData->m_buffer.bufferLevelNew.back() -
                      (streamData->transmissionEndReceivingSegment -
-                      streamData->throughput.transmissionEnd.back()),
+                      streamData->m_throughput.transmissionEnd.back()),
                  (int64_t)0));
   } else {
     // 第一段，旧缓冲量为0
-    streamData->bufferData.bufferLevelOld.push_back(0);
+    streamData->m_buffer.bufferLevelOld.push_back(0);
   }
 
   // 计算新缓冲量
-  streamData->bufferData.bufferLevelNew.push_back(streamData->bufferData.bufferLevelOld.back() +
-                                                  streamData->segmentDuration);
+  streamData->m_buffer.bufferLevelNew.push_back(streamData->m_buffer.bufferLevelOld.back() +
+                                                streamData->segmentDuration);
 
   // 记录吞吐量相关信息
-  streamData->throughput.bytesReceived.push_back(
-      streamData->videoInfo.segmentSize.at(streamData->currentRepIndex)
+  streamData->m_throughput.bytesReceived.push_back(
+      streamData->m_video.segmentSize.at(streamData->currentRepIndex)
           .at(streamData->segmentCounter));
-  streamData->throughput.transmissionStart.push_back(streamData->transmissionStartReceivingSegment);
-  streamData->throughput.transmissionRequested.push_back(streamData->downloadRequestSent);
-  streamData->throughput.transmissionEnd.push_back(streamData->transmissionEndReceivingSegment);
+  streamData->m_throughput.transmissionStart.push_back(
+      streamData->transmissionStartReceivingSegment);
+  streamData->m_throughput.transmissionRequested.push_back(streamData->downloadRequestSent);
+  streamData->m_throughput.transmissionEnd.push_back(streamData->transmissionEndReceivingSegment);
 
   // 写入下载日志
   LogDownload(streamType);
@@ -602,8 +607,8 @@ int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile, boo
   int64_t averageByteSizeTemp = 0;  // 临时保存平均字节数
 
   // 清空现有数据
-  streamData->videoInfo.segmentSize.clear();
-  streamData->videoInfo.averageBitrate.clear();
+  streamData->m_video.segmentSize.clear();
+  streamData->m_video.averageBitrate.clear();
 
   // 按行读取文件
   while (std::getline(myfile, temp)) {
@@ -617,25 +622,25 @@ int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile, boo
                               std::istream_iterator<int64_t>());
 
     // 保存段大小数据
-    streamData->videoInfo.segmentSize.push_back(line);
+    streamData->m_video.segmentSize.push_back(line);
 
     // 计算平均字节数
     averageByteSizeTemp = (int64_t)std::accumulate(line.begin(), line.end(), 0.0) / line.size();
 
     // 计算并保存平均比特率（bit/s）
-    streamData->videoInfo.averageBitrate.push_back((8.0 * averageByteSizeTemp) /
-                                                   (streamData->segmentDuration / 1000000.0));
+    streamData->m_video.averageBitrate.push_back((8.0 * averageByteSizeTemp) /
+                                                 (streamData->segmentDuration / 1000000.0));
   }
 
   // 确保成功读取数据
-  NS_ASSERT_MSG(!streamData->videoInfo.segmentSize.empty(),
+  NS_ASSERT_MSG(!streamData->m_video.segmentSize.empty(),
                 "No segment sizes read from file: " << segmentSizeFile);
 
   myfile.close();  // 关闭文件
 
   NS_LOG_INFO("Loaded " << (isVideo ? "video" : "audio") << " bitrate file with "
-                        << streamData->videoInfo.segmentSize.size() << " representations and "
-                        << streamData->videoInfo.segmentSize[0].size() << " segments");
+                        << streamData->m_video.segmentSize.size() << " representations and "
+                        << streamData->m_video.segmentSize[0].size() << " segments");
 
   return 1;
 }
@@ -666,8 +671,8 @@ bool MultiTcpAvStreamClient::PlaybackHandle() {
     }
 
     // 记录播放开始时间（使用视频流的时间）
-    m_videoStream.playbackData.playbackStart.push_back(timeNow);
-    m_audioStream.playbackData.playbackStart.push_back(timeNow);
+    m_videoStream.m_playback.playbackStart.push_back(timeNow);
+    m_audioStream.m_playback.playbackStart.push_back(timeNow);
 
     // 记录播放日志
     LogPlayback(VIDEO_STREAM);
@@ -891,7 +896,7 @@ void MultiTcpAvStreamClient::LogDownload(StreamType streamType) {
   if (streamData == NULL) return;
 
   // 获取当前段大小
-  int64_t segmentSize = streamData->videoInfo.segmentSize.at(streamData->currentRepIndex)
+  int64_t segmentSize = streamData->m_video.segmentSize.at(streamData->currentRepIndex)
                             .at(streamData->segmentCounter);
 
   // 写入下载日志
@@ -918,11 +923,11 @@ void MultiTcpAvStreamClient::LogBuffer(StreamType streamType) {
   streamData->bufferLog << std::setfill(' ') << std::setw(13)
                         << streamData->transmissionEndReceivingSegment / (double)1000000 << " "
                         << std::setfill(' ') << std::setw(13)
-                        << streamData->bufferData.bufferLevelOld.back() / (double)1000000 << "\n"
+                        << streamData->m_buffer.bufferLevelOld.back() / (double)1000000 << "\n"
                         << std::setfill(' ') << std::setw(13)
                         << streamData->transmissionEndReceivingSegment / (double)1000000 << " "
                         << std::setfill(' ') << std::setw(13)
-                        << streamData->bufferData.bufferLevelNew.back() / (double)1000000 << "\n";
+                        << streamData->m_buffer.bufferLevelNew.back() / (double)1000000 << "\n";
   streamData->bufferLog.flush();
 }
 
@@ -956,7 +961,7 @@ void MultiTcpAvStreamClient::LogPlayback(StreamType streamType) {
                           << std::setfill(' ') << std::setw(14)
                           << Simulator::Now().GetMicroSeconds() / (double)1000000 << " "
                           << std::setfill(' ') << std::setw(13)
-                          << streamData->playbackData.playbackIndex.at(m_currentPlaybackIndex)
+                          << streamData->m_playback.playbackIndex.at(m_currentPlaybackIndex)
                           << "\n";
   streamData->playbackLog.flush();
 }
@@ -965,9 +970,6 @@ void MultiTcpAvStreamClient::LogPlayback(StreamType streamType) {
 void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId, std::string clientId,
                                                 std::string numberOfClients) {
   NS_LOG_FUNCTION(this << simulationId << clientId << numberOfClients);
-
-  // 全局日志目录（假设已定义）
-  extern std::string dashLogDirectory;
 
   // 初始化视频流日志文件
   std::string videoPrefix = dashLogDirectory + m_algoName + "/" + numberOfClients + "/sim" +

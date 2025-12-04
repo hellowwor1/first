@@ -1,17 +1,3 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * 版权所有 2016 Technische Universitaet Berlin
- *
- * 本程序是自由软件；你可以根据 GNU 通用公共许可证第 2 版
- * （由自由软件基金会发布）重新分发和/或修改它。
- *
- * 本程序按“希望有用”的原则分发，但不提供任何保证，
- * 包括对适销性或特定用途适用性的隐含保证。
- *
- * 你应该已经收到了一份 GNU 通用公共许可证的副本，
- * 如果没有，请写信至自由软件基金会，地址：
- * 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
 #ifndef TCP_STREAM_INTERFACE_H
 #define TCP_STREAM_INTERFACE_H
 
@@ -45,13 +31,10 @@ struct algorithmReply {
  * 用于计算下一步要请求的表示层。
  */
 struct throughputData {
-  std::vector<int64_t>
-      transmissionRequested;  //!< 客户端请求片段的模拟时间（微秒）
-  std::vector<int64_t>
-      transmissionStart;  //!< 收到片段第一个数据包的模拟时间（微秒）
-  std::vector<int64_t>
-      transmissionEnd;  //!< 收到片段最后一个数据包的模拟时间（微秒）
-  std::vector<int64_t> bytesReceived;  //!< 接收的字节数，即片段大小
+  std::vector<int64_t> transmissionRequested;  //!< 客户端请求片段的模拟时间（微秒）
+  std::vector<int64_t> transmissionStart;      //!< 收到片段第一个数据包的模拟时间（微秒）
+  std::vector<int64_t> transmissionEnd;        //!< 收到片段最后一个数据包的模拟时间（微秒）
+  std::vector<int64_t> bytesReceived;          //!< 接收的字节数，即片段大小
 };
 
 /*! \class bufferData tcp-stream-interface.h "model/tcp-stream-interface.h"
@@ -61,11 +44,9 @@ struct throughputData {
  * 追踪缓冲区的状态。
  */
 struct bufferData {
-  std::vector<int64_t> timeNow;  //!< 当前模拟时间（微秒）
-  std::vector<int64_t>
-      bufferLevelOld;  //!< 添加刚下载片段前的缓冲区长度（微秒）
-  std::vector<int64_t>
-      bufferLevelNew;  //!< 添加刚下载片段后的缓冲区长度（微秒）
+  std::vector<int64_t> timeNow;         //!< 当前模拟时间（微秒）
+  std::vector<int64_t> bufferLevelOld;  //!< 添加刚下载片段前的缓冲区长度（微秒）
+  std::vector<int64_t> bufferLevelNew;  //!< 添加刚下载片段后的缓冲区长度（微秒）
 };
 
 /*! \class videoData tcp-stream-interface.h "model/tcp-stream-interface.h"
@@ -79,7 +60,14 @@ struct bufferData {
  */
 struct videoData {
   std::vector<std::vector<int64_t>>
-      segmentSize;  //!< 第一维表示层，第二维存储对应片段的大小（字节）
+      segmentSize;                     //!< 第一维表示层，第二维存储对应片段的大小（字节）
+  std::vector<double> averageBitrate;  //!< 每个表示层的平均码率（比特）
+  int64_t segmentDuration;             //!< 片段时长（微秒）
+};
+
+struct audioData {
+  std::vector<std::vector<int64_t>>
+      segmentSize;                     //!< 第一维表示层，第二维存储对应片段的大小（字节）
   std::vector<double> averageBitrate;  //!< 每个表示层的平均码率（比特）
   int64_t segmentDuration;             //!< 片段时长（微秒）
 };

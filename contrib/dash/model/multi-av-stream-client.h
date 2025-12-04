@@ -125,7 +125,8 @@ class MultiTcpAvStreamClient : public Application {
     StreamType type;            //!< 流类型枚举
 
     // 视频数据相关
-    videoData videoInfo;                        //!< 视频段信息
+    videoData m_video;  //!< 视频段信息
+    audioData m_audio;
     int64_t currentRepIndex;                    //!< 当前码率索引
     int64_t segmentCounter;                     //!< 已下载段计数器
     int64_t bytesReceived;                      //!< 当前段已接收字节数
@@ -134,9 +135,9 @@ class MultiTcpAvStreamClient : public Application {
     int64_t downloadRequestSent;                //!< 下载请求发送时间
 
     // 吞吐量和缓冲区数据
-    throughputData throughput;  //!< 吞吐量跟踪数据
-    bufferData bufferData;      //!< 缓冲区跟踪数据
-    playbackData playbackData;  //!< 播放跟踪数据
+    throughputData m_throughput;  //!< 吞吐量跟踪数据
+    bufferData m_buffer;          //!< 缓冲区跟踪数据
+    playbackData m_playback;      //!< 播放跟踪数据
 
     // 统计信息
     int64_t lastSegmentIndex;  //!< 最后一个段索引
@@ -291,6 +292,24 @@ class MultiTcpAvStreamClient : public Application {
 
   // 音频流数据
   StreamData m_audioStream;  //!< 音频流数据
+
+  // 视频服务器地址/端口
+  Address GetVideoRemoteAddress() const { return m_videoStream.peerAddress; }
+  void SetVideoRemoteAddress(Address a) { m_videoStream.peerAddress = a; }
+
+  uint16_t GetVideoRemotePort() const { return m_videoStream.peerPort; }
+  void SetVideoRemotePort(uint16_t p) { m_videoStream.peerPort = p; }
+
+  // 音频服务器地址/端口
+  Address GetAudioRemoteAddress() const { return m_audioStream.peerAddress; }
+  void SetAudioRemoteAddress(Address a) { m_audioStream.peerAddress = a; }
+
+  uint16_t GetAudioRemotePort() const { return m_audioStream.peerPort; }
+  void SetAudioRemotePort(uint16_t p) { m_audioStream.peerPort = p; }
+
+  // 段持续时间
+  uint64_t GetSegmentDuration() const { return m_videoStream.segmentDuration; }
+  void SetSegmentDuration(uint64_t d) { m_videoStream.segmentDuration = d; }
 
   uint16_t m_clientId;         //!< 客户端ID
   uint16_t m_simulationId;     //!< 仿真ID

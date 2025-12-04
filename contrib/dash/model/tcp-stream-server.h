@@ -1,17 +1,3 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * 版权所有 2016 Technische Universitaet Berlin
- *
- * 本程序是自由软件；你可以按照自由软件基金会发布的 GNU 通用公共许可证第 2
- * 版重新发布和/或修改它。
- *
- * 本程序是希望它有用，但不提供任何担保；甚至不提供适销性或适合特定用途的默示担保。
- *
- * 你应该已经收到了一份 GNU
- * 通用公共许可证的副本；如果没有，请向自由软件基金会索取： 地址：59 Temple
- * Place, Suite 330, Boston, MA 02111-1307 USA
- */
-
 #ifndef TCP_STREAM_SERVER_H
 #define TCP_STREAM_SERVER_H
 
@@ -40,9 +26,8 @@ class PropagationDelayModel;
  * \brief 服务器用于管理每个客户端数据的数据结构。
  */
 struct callbackData {
-  uint32_t
-      currentTxBytes;  //!< 已经发送的字节数，如果发送的字节数等于packetSizeToReturn，则设置为
-                       //!< 0，表示该段传输完成
+  uint32_t currentTxBytes;  //!< 已经发送的字节数，如果发送的字节数等于packetSizeToReturn，则设置为
+                            //!< 0，表示该段传输完成
   uint32_t packetSizeToReturn;  //!< 需要返回给客户端的总字节数
   bool send;                    //!< 如果当前段还有未发送的字节，则为 true
 };

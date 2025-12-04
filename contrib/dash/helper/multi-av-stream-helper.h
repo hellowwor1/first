@@ -1,482 +1,201 @@
-// 包含多TCP流AV服务器的头文件
-#include "multi-av-stream-server.h"
+#ifndef MULTI_AV_STREAM_HELPER_H
+#define MULTI_AV_STREAM_HELPER_H
 
-// 包含NS3核心模块
-#include <ns3/core-module.h>
+#include <stdint.h>
 
-// 引入NS3地址相关工具函数
-#include "ns3/address-utils.h"
+#include <string>
+#include <utility>
+#include <vector>
 
-// IPv4和IPv6套接字地址
-#include "ns3/inet-socket-address.h"
-#include "ns3/inet6-socket-address.h"
+#include "ns3/application-container.h"
 #include "ns3/ipv4-address.h"
 #include "ns3/ipv6-address.h"
+#include "ns3/node-container.h"
+#include "ns3/object-factory.h"
 
-// 日志系统
-#include "ns3/log.h"
-
-// 时间相关
-#include "ns3/nstime.h"
-
-// 数据包相关
-#include "ns3/packet.h"
-
-// 仿真器
-#include "ns3/simulator.h"
-
-// 套接字工厂和套接字
-#include "ns3/socket-factory.h"
-#include "ns3/socket.h"
-#include "ns3/tcp-socket-factory.h"
-#include "ns3/tcp-socket.h"
-
-// 跟踪源访问
-#include "ns3/trace-source-accessor.h"
-
-// 无符号整数类型支持
-#include "ns3/uinteger.h"
-
-// 字符串流支持
-#include <sstream>
-
-// 声明使用ns3命名空间
 namespace ns3 {
 
-// 定义日志组件名称
-NS_LOG_COMPONENT_DEFINE("MultiTcpAvStreamServerApplication");
-
-// 确保MultiTcpAvStreamServer类型在NS3对象系统中注册
-NS_OBJECT_ENSURE_REGISTERED(MultiTcpAvStreamServer);
-
-// 获取类型标识函数
-TypeId MultiTcpAvStreamServer::GetTypeId(void) {
-  // 静态TypeId，保证只创建一次
-  static TypeId tid =
-      TypeId("ns3::MultiTcpAvStreamServer")          // 类型名称
-          .SetParent<Application>()                  // 指定父类为Application
-          .SetGroupName("Applications")              // 分组名称
-          .AddConstructor<MultiTcpAvStreamServer>()  // 添加默认构造函数
-          // 添加视频端口属性
-          .AddAttribute("VideoPort", "Port on which we listen for video stream requests.",
-                        UintegerValue(10000),  // 默认视频端口10000
-                        MakeUintegerAccessor(&MultiTcpAvStreamServer::m_videoPort),
-                        MakeUintegerChecker<uint16_t>())
-          // 添加音频端口属性
-          .AddAttribute("AudioPort", "Port on which we listen for audio stream requests.",
-                        UintegerValue(10001),  // 默认音频端口10001
-                        MakeUintegerAccessor(&MultiTcpAvStreamServer::m_audioPort),
-                        MakeUintegerChecker<uint16_t>());
-  return tid;
-}
-
-// 构造函数
-MultiTcpAvStreamServer::MultiTcpAvStreamServer()
-    : m_videoPort(10000),   // 初始化视频端口
-      m_audioPort(10001) {  // 初始化音频端口
-  NS_LOG_FUNCTION(this);    // 记录日志：构造函数被调用
-}
-
-// 析构函数，生命周期结束时调用
-MultiTcpAvStreamServer::~MultiTcpAvStreamServer() {
-  NS_LOG_FUNCTION(this);  // 记录日志：析构函数被调用
-  m_videoSocket = 0;      // 清空视频IPv4套接字指针
-  m_videoSocket6 = 0;     // 清空视频IPv6套接字指针
-  m_audioSocket = 0;      // 清空音频IPv4套接字指针
-  m_audioSocket6 = 0;     // 清空音频IPv6套接字指针
-}
-
-// 设置视频流端口
-void MultiTcpAvStreamServer::SetVideoPort(uint16_t port) {
-  NS_LOG_FUNCTION(this << port);  // 记录日志
-  m_videoPort = port;             // 更新视频端口
-}
-
-// 设置音频流端口
-void MultiTcpAvStreamServer::SetAudioPort(uint16_t port) {
-  NS_LOG_FUNCTION(this << port);  // 记录日志
-  m_audioPort = port;             // 更新音频端口
-}
-
-// 获取视频流端口
-uint16_t MultiTcpAvStreamServer::GetVideoPort(void) const {
-  NS_LOG_FUNCTION(this);  // 记录日志
-  return m_videoPort;     // 返回视频端口
-}
-
-// 获取音频流端口
-uint16_t MultiTcpAvStreamServer::GetAudioPort(void) const {
-  NS_LOG_FUNCTION(this);  // 记录日志
-  return m_audioPort;     // 返回音频端口
-}
-
-// 释放资源函数
-void MultiTcpAvStreamServer::DoDispose(void) {
-  NS_LOG_FUNCTION(this);     // 记录日志
-  Application::DoDispose();  // 调用父类释放函数
-}
-
-// 应用程序启动函数
-void MultiTcpAvStreamServer::StartApplication(void) {
-  NS_LOG_FUNCTION(this);  // 记录日志
-
-  // 创建并初始化视频流套接字（IPv4）
-  if (m_videoSocket == 0) {
-    TypeId tid = TypeId::LookupByName("ns3::TcpSocketFactory");  // 获取TCP套接字工厂
-    m_videoSocket = Socket::CreateSocket(GetNode(), tid);        // 创建套接字
-    InetSocketAddress local = InetSocketAddress(Ipv4Address::GetAny(), m_videoPort);
-    if (m_videoSocket->Bind(local) == -1) {           // 绑定套接字到指定端口
-      NS_FATAL_ERROR("Failed to bind video socket");  // 绑定失败则报错
-    }
-    m_videoSocket->Listen();                                        // 开始监听连接请求
-    NS_LOG_INFO("Video server listening on port " << m_videoPort);  // 记录日志
-  }
-
-  // 创建并初始化视频流套接字（IPv6）
-  if (m_videoSocket6 == 0) {
-    TypeId tid = TypeId::LookupByName("ns3::TcpSocketFactory");
-    m_videoSocket6 = Socket::CreateSocket(GetNode(), tid);
-    Inet6SocketAddress local6 = Inet6SocketAddress(Ipv6Address::GetAny(), m_videoPort);
-    if (m_videoSocket6->Bind(local6) == -1) {
-      NS_FATAL_ERROR("Failed to bind video socket6");
-    }
-    m_videoSocket6->Listen();
-  }
-
-  // 创建并初始化音频流套接字（IPv4）
-  if (m_audioSocket == 0) {
-    TypeId tid = TypeId::LookupByName("ns3::TcpSocketFactory");
-    m_audioSocket = Socket::CreateSocket(GetNode(), tid);
-    InetSocketAddress local = InetSocketAddress(Ipv4Address::GetAny(), m_audioPort);
-    if (m_audioSocket->Bind(local) == -1) {
-      NS_FATAL_ERROR("Failed to bind audio socket");
-    }
-    m_audioSocket->Listen();
-    NS_LOG_INFO("Audio server listening on port " << m_audioPort);
-  }
-
-  // 创建并初始化音频流套接字（IPv6）
-  if (m_audioSocket6 == 0) {
-    TypeId tid = TypeId::LookupByName("ns3::TcpSocketFactory");
-    m_audioSocket6 = Socket::CreateSocket(GetNode(), tid);
-    Inet6SocketAddress local6 = Inet6SocketAddress(Ipv6Address::GetAny(), m_audioPort);
-    if (m_audioSocket6->Bind(local6) == -1) {
-      NS_FATAL_ERROR("Failed to bind audio socket6");
-    }
-    m_audioSocket6->Listen();
-  }
-
-  // 设置视频套接字连接接受回调
-  m_videoSocket->SetAcceptCallback(
-      MakeNullCallback<bool, Ptr<Socket>, const Address &>(),      // 无条件接受连接
-      MakeCallback(&MultiTcpAvStreamServer::HandleAccept, this));  // 接受后处理
-
-  m_videoSocket6->SetAcceptCallback(MakeNullCallback<bool, Ptr<Socket>, const Address &>(),
-                                    MakeCallback(&MultiTcpAvStreamServer::HandleAccept, this));
-
-  // 设置音频套接字连接接受回调
-  m_audioSocket->SetAcceptCallback(MakeNullCallback<bool, Ptr<Socket>, const Address &>(),
-                                   MakeCallback(&MultiTcpAvStreamServer::HandleAccept, this));
-
-  m_audioSocket6->SetAcceptCallback(MakeNullCallback<bool, Ptr<Socket>, const Address &>(),
-                                    MakeCallback(&MultiTcpAvStreamServer::HandleAccept, this));
-
-  // 设置套接字关闭相关回调
-  m_videoSocket->SetCloseCallbacks(MakeCallback(&MultiTcpAvStreamServer::HandlePeerClose, this),
-                                   MakeCallback(&MultiTcpAvStreamServer::HandlePeerError, this));
-
-  m_videoSocket6->SetCloseCallbacks(MakeCallback(&MultiTcpAvStreamServer::HandlePeerClose, this),
-                                    MakeCallback(&MultiTcpAvStreamServer::HandlePeerError, this));
-
-  m_audioSocket->SetCloseCallbacks(MakeCallback(&MultiTcpAvStreamServer::HandlePeerClose, this),
-                                   MakeCallback(&MultiTcpAvStreamServer::HandlePeerError, this));
-
-  m_audioSocket6->SetCloseCallbacks(MakeCallback(&MultiTcpAvStreamServer::HandlePeerClose, this),
-                                    MakeCallback(&MultiTcpAvStreamServer::HandlePeerError, this));
-}
-
-// 应用程序停止函数
-void MultiTcpAvStreamServer::StopApplication(void) {
-  NS_LOG_FUNCTION(this);  // 记录日志
-
-  // 关闭视频套接字并清空回调
-  if (m_videoSocket != 0) {
-    m_videoSocket->Close();
-    m_videoSocket->SetRecvCallback(MakeNullCallback<void, Ptr<Socket>>());
-    m_videoSocket->SetAcceptCallback(MakeNullCallback<bool, Ptr<Socket>, const Address &>(),
-                                     MakeNullCallback<void, Ptr<Socket>, const Address &>());
-  }
-
-  if (m_videoSocket6 != 0) {
-    m_videoSocket6->Close();
-    m_videoSocket6->SetRecvCallback(MakeNullCallback<void, Ptr<Socket>>());
-    m_videoSocket6->SetAcceptCallback(MakeNullCallback<bool, Ptr<Socket>, const Address &>(),
-                                      MakeNullCallback<void, Ptr<Socket>, const Address &>());
-  }
-
-  // 关闭音频套接字并清空回调
-  if (m_audioSocket != 0) {
-    m_audioSocket->Close();
-    m_audioSocket->SetRecvCallback(MakeNullCallback<void, Ptr<Socket>>());
-    m_audioSocket->SetAcceptCallback(MakeNullCallback<bool, Ptr<Socket>, const Address &>(),
-                                     MakeNullCallback<void, Ptr<Socket>, const Address &>());
-  }
-
-  if (m_audioSocket6 != 0) {
-    m_audioSocket6->Close();
-    m_audioSocket6->SetRecvCallback(MakeNullCallback<void, Ptr<Socket>>());
-    m_audioSocket6->SetAcceptCallback(MakeNullCallback<bool, Ptr<Socket>, const Address &>(),
-                                      MakeNullCallback<void, Ptr<Socket>, const Address &>());
-  }
-}
-
-void MultiTcpAvStreamServer::HandleRead(Ptr<Socket> socket) {
-  NS_LOG_FUNCTION(this << socket);  // 记录日志
-
-  Ptr<Packet> packet;  // 数据包指针
-  Address from;        // 客户端地址
-
-  // 从套接字接收数据包
-  packet = socket->RecvFrom(from);
-
-  // 获取客户端信息
-  InetSocketAddress inetFrom = InetSocketAddress::ConvertFrom(from);
-
-  // 解析客户端请求，获取请求的字节数（纯数字）
-  int64_t packetSizeToReturn = ParseCommand(packet);
-
-  // 获取本地端口以确定流类型
-  Address localAddress;
-  socket->GetSockName(localAddress);
-  InetSocketAddress inetLocal = InetSocketAddress::ConvertFrom(localAddress);
-
-  // 根据端口确定流类型
-  std::string streamType = GetStreamTypeFromPort(inetLocal.GetPort());
-
-  // 创建客户端标识键：地址+端口+流类型
-  std::stringstream keyStream;
-  keyStream << inetFrom.GetIpv4() << ":" << inetFrom.GetPort() << ":" << streamType;
-  std::string clientKey = keyStream.str();
-
-  NS_LOG_INFO("Received " << streamType << " request from " << clientKey << " for "
-                          << packetSizeToReturn << " bytes");
-
-  // 为该客户端初始化回调数据
-  MultiTcpAvCallbackData cbd;
-  cbd.currentTxBytes = 0;                       // 已发送字节数清零
-  cbd.packetSizeToReturn = packetSizeToReturn;  // 设置要发送的总字节数
-  cbd.send = true;                              // 标记为需要发送
-  cbd.streamType = streamType;                  // 记录流类型
-
-  // 存储回调数据
-  m_callbackDataMap[clientKey] = cbd;
-
-  // 开始发送数据
-  HandleSend(socket, socket->GetTxAvailable());
-}
-
-// 处理发送逻辑
-void MultiTcpAvStreamServer::HandleSend(Ptr<Socket> socket, uint32_t txSpace) {
-  NS_LOG_FUNCTION(this << socket << txSpace);  // 记录日志
-
-  Address from;
-  socket->GetPeerName(from);  // 获取客户端地址
-
-  // 获取流类型
-  std::string streamType;
-  auto socketIt = m_socketStreamMap.find(socket);
-  if (socketIt != m_socketStreamMap.end()) {
-    streamType = socketIt->second;
-  }
-
-  // 创建客户端标识键
-  InetSocketAddress inetFrom = InetSocketAddress::ConvertFrom(from);
-  std::stringstream keyStream;
-  keyStream << inetFrom.GetIpv4() << ":" << inetFrom.GetPort() << ":" << streamType;
-  std::string clientKey = keyStream.str();
-
-  // 查找客户端回调数据
-  auto it = m_callbackDataMap.find(clientKey);
-  if (it == m_callbackDataMap.end()) {
-    NS_LOG_WARN("No callback data found for client: " << clientKey);
-    return;
-  }
-
-  MultiTcpAvCallbackData &cbd = it->second;  // 获取回调数据引用
-
-  // 检查是否已经发送完数据
-  if (cbd.currentTxBytes == cbd.packetSizeToReturn) {
-    cbd.currentTxBytes = 0;      // 重置已发送字节数
-    cbd.packetSizeToReturn = 0;  // 重置要发送字节数
-    cbd.send = false;            // 标记不再发送
-
-    NS_LOG_INFO("Finished sending " << cbd.packetSizeToReturn << " bytes of " << cbd.streamType
-                                    << " to " << clientKey);
-    return;
-  }
-
-  // 如果发送缓冲区有空间并且标记为发送
-  if (socket->GetTxAvailable() > 0 && cbd.send) {
-    // 计算实际可发送的字节数
-    uint32_t toSend =
-        std::min(socket->GetTxAvailable(), cbd.packetSizeToReturn - cbd.currentTxBytes);
-
-    // 创建数据包并发送
-    Ptr<Packet> packet = Create<Packet>(toSend);
-    int amountSent = socket->Send(packet, 0);
-
-    if (amountSent > 0) {
-      cbd.currentTxBytes += amountSent;  // 更新已发送字节数
-
-      NS_LOG_DEBUG("Sent " << amountSent << " bytes of " << cbd.streamType << " to " << clientKey
-                           << " (total: " << cbd.currentTxBytes << "/" << cbd.packetSizeToReturn
-                           << ")");
-
-      // 如果还没发送完，继续发送
-      if (cbd.currentTxBytes < cbd.packetSizeToReturn) {
-        // 延迟一小段时间后继续发送，避免阻塞
-        Simulator::Schedule(MicroSeconds(10), &MultiTcpAvStreamServer::HandleSend, this, socket,
-                            socket->GetTxAvailable());
-      }
-    } else {
-      NS_LOG_WARN("Failed to send data to " << clientKey << ", buffer full?");
-    }
-  }
-}
-
-// 处理接收到的新连接
-void MultiTcpAvStreamServer::HandleAccept(Ptr<Socket> s, const Address &from) {
-  NS_LOG_FUNCTION(this << s << from);  // 记录日志
-
-  // 获取本地端口以确定流类型
-  Address localAddress;
-  s->GetSockName(localAddress);
-  InetSocketAddress inetLocal = InetSocketAddress::ConvertFrom(localAddress);
-  uint16_t localPort = inetLocal.GetPort();
-
-  // 根据端口确定流类型
-  std::string streamType = GetStreamTypeFromPort(localPort);
-
-  // 创建客户端标识键
-  InetSocketAddress inetFrom = InetSocketAddress::ConvertFrom(from);
-  std::stringstream keyStream;
-  keyStream << inetFrom.GetIpv4() << ":" << inetFrom.GetPort() << ":" << streamType;
-  std::string clientKey = keyStream.str();
-
-  // 初始化回调数据结构
-  MultiTcpAvCallbackData cbd;
-  cbd.currentTxBytes = 0;
-  cbd.packetSizeToReturn = 0;
-  cbd.send = false;
-  cbd.streamType = streamType;
-
-  // 存储回调数据
-  m_callbackDataMap[clientKey] = cbd;
-
-  // 添加到已连接客户端列表
-  m_connectedClients.push_back(clientKey);
-
-  // 建立套接字到流类型的映射
-  m_socketStreamMap[s] = streamType;
-
-  // 设置接收回调
-  s->SetRecvCallback(MakeCallback(&MultiTcpAvStreamServer::HandleRead, this));
-
-  // 设置发送回调
-  s->SetSendCallback(MakeCallback(&MultiTcpAvStreamServer::HandleSend, this));
-
-  NS_LOG_INFO("New " << streamType << " connection established from " << inetFrom.GetIpv4() << ":"
-                     << inetFrom.GetPort() << " on port " << localPort);
-}
-
-// 处理客户端关闭连接
-void MultiTcpAvStreamServer::HandlePeerClose(Ptr<Socket> socket) {
-  NS_LOG_FUNCTION(this << socket);  // 记录日志
-
-  Address from;
-  socket->GetPeerName(from);  // 获取客户端地址
-
-  // 获取流类型
-  std::string streamType;
-  auto socketIt = m_socketStreamMap.find(socket);
-  if (socketIt != m_socketStreamMap.end()) {
-    streamType = socketIt->second;
-  }
-
-  // 创建客户端标识键
-  InetSocketAddress inetFrom = InetSocketAddress::ConvertFrom(from);
-  std::stringstream keyStream;
-  keyStream << inetFrom.GetIpv4() << ":" << inetFrom.GetPort() << ":" << streamType;
-  std::string clientKey = keyStream.str();
-
-  NS_LOG_INFO("Client " << clientKey << " closed connection");
-
-  // 从已连接列表中删除客户端
-  for (auto it = m_connectedClients.begin(); it != m_connectedClients.end(); ++it) {
-    if (*it == clientKey) {
-      m_connectedClients.erase(it);  // 删除客户端
-
-      // 从回调数据映射中删除
-      m_callbackDataMap.erase(clientKey);
-
-      // 从套接字映射中删除
-      m_socketStreamMap.erase(socket);
-
-      NS_LOG_INFO("Remaining connections: " << m_connectedClients.size());
-      return;
-    }
-  }
-}
-
-// 处理客户端出现错误
-void MultiTcpAvStreamServer::HandlePeerError(Ptr<Socket> socket) {
-  NS_LOG_FUNCTION(this << socket);  // 记录日志
-
-  // 获取客户端地址
-  Address from;
-  socket->GetPeerName(from);
-  InetSocketAddress inetFrom = InetSocketAddress::ConvertFrom(from);
-
-  NS_LOG_ERROR("Error with connection from " << inetFrom.GetIpv4() << ":" << inetFrom.GetPort());
-}
-
-// 修改 ParseCommand 函数，只解析纯数字
-int64_t MultiTcpAvStreamServer::ParseCommand(Ptr<Packet> packet) {
-  NS_LOG_FUNCTION(this << packet);  // 记录日志
-
-  // 分配缓冲区并复制数据
-  uint8_t *buffer = new uint8_t[packet->GetSize()];
-  packet->CopyData(buffer, packet->GetSize());
-
-  // 转换为字符串（纯数字，例如："1048576"）
-  std::string bytesStr((char *)buffer, packet->GetSize());
-  delete[] buffer;  // 释放缓冲区
-
-  // 转换为整数
-  int64_t bytes = 0;
-  try {
-    bytes = std::stoll(bytesStr);
-  } catch (const std::exception &e) {
-    NS_LOG_ERROR("Failed to parse bytes: " << bytesStr << ", error: " << e.what());
-    return 0;
-  }
-
-  NS_LOG_DEBUG("Parsed request for " << bytes << " bytes");
-  return bytes;
-}
-
-// 从端口号获取流类型
-std::string MultiTcpAvStreamServer::GetStreamTypeFromPort(uint16_t localPort) {
-  NS_LOG_FUNCTION(this << localPort);  // 记录日志
-
-  if (localPort == m_videoPort) {
-    return "video";
-  } else if (localPort == m_audioPort) {
-    return "audio";
-  } else {
-    NS_LOG_WARN("Unknown port " << localPort << ", defaulting to 'unknown'");
-    return "unknown";
-  }
-}
+/**
+ * \ingroup multiTcpAvStream
+ * \brief 创建多TCP流AV服务器应用的Helper类
+ *
+ * 支持同时创建视频服务器和音频服务器应用，分别监听不同端口
+ */
+class MultiTcpAvStreamServerHelper {
+ public:
+  /**
+   * 创建MultiTcpAvStreamServerHelper，方便用户设置多流服务器仿真
+   *
+   * \param videoPort 视频服务器监听端口
+   * \param audioPort 音频服务器监听端口
+   */
+  MultiTcpAvStreamServerHelper(uint16_t videoPort, uint16_t audioPort);
+
+  /**
+   * 创建MultiTcpAvStreamServerHelper，使用默认端口
+   * 视频端口：10000，音频端口：10001
+   */
+  MultiTcpAvStreamServerHelper();
+
+  /**
+   * 设置在每个应用创建后要配置的属性
+   *
+   * \param name 要设置的属性名称
+   * \param value 要设置的属性值
+   */
+  void SetAttribute(std::string name, const AttributeValue &value);
+
+  /**
+   * 在指定节点上创建一个MultiTcpAvStreamServerApplication
+   *
+   * \param node 指定创建应用的节点Ptr<Node>
+   * \returns 返回一个ApplicationContainer，包含创建的应用
+   */
+  ApplicationContainer Install(Ptr<Node> node) const;
+
+  /**
+   * 在指定名称的节点上创建一个MultiTcpAvStreamServerApplication
+   *
+   * \param nodeName 指定创建应用的节点名称，该名称之前已在对象命名服务中注册
+   * \returns 返回一个ApplicationContainer，包含创建的应用
+   */
+  ApplicationContainer Install(std::string nodeName) const;
+
+  /**
+   * \param c 要创建应用的节点，使用NodeContainer指定
+   *
+   * 在NodeContainer中的每个节点上创建一个多TCP流AV服务器应用
+   * 每个节点将同时运行视频和音频服务器（监听不同端口）
+   *
+   * \returns 返回创建的应用，每个节点一个应用
+   */
+  ApplicationContainer Install(NodeContainer c) const;
+
+  /**
+   * 安装视频服务器到指定节点
+   * \param node 目标节点
+   * \param videoPort 视频服务器端口
+   * \returns 返回安装的应用指针
+   */
+  Ptr<Application> InstallVideoServer(Ptr<Node> node, uint16_t videoPort) const;
+
+  /**
+   * 安装音频服务器到指定节点
+   * \param node 目标节点
+   * \param audioPort 音频服务器端口
+   * \returns 返回安装的应用指针
+   */
+  Ptr<Application> InstallAudioServer(Ptr<Node> node, uint16_t audioPort) const;
+
+ private:
+  /**
+   * 在节点上安装一个ns3::MultiTcpAvStreamServer，并使用SetAttribute设置的所有属性
+   *
+   * \param node 要安装MultiTcpAvStreamServer的节点
+   * \returns 返回安装的应用Ptr
+   */
+  Ptr<Application> InstallPriv(Ptr<Node> node) const;
+
+  ObjectFactory m_factory;  //!< 对象工厂
+  uint16_t m_videoPort;     //!< 视频服务器端口
+  uint16_t m_audioPort;     //!< 音频服务器端口
+  bool m_useDefaultPorts;   //!< 是否使用默认端口
+};
+
+/**
+ * \ingroup multiTcpAvStream
+ * \brief 创建多TCP流AV客户端应用的Helper类
+ *
+ * 支持同时连接视频服务器和音频服务器，获取多源多路径的媒体流
+ */
+class MultiTcpAvStreamClientHelper {
+ public:
+  /**
+   * 创建MultiTcpAvStreamClientHelper，方便用户设置多流客户端仿真
+   *
+   * \param videoIp 视频服务器的IP地址
+   * \param videoPort 视频服务器的端口号
+   * \param audioIp 音频服务器的IP地址
+   * \param audioPort 音频服务器的端口号
+   */
+  MultiTcpAvStreamClientHelper(Address videoIp, uint16_t videoPort, Address audioIp,
+                               uint16_t audioPort);
+
+  /**
+   * 创建MultiTcpAvStreamClientHelper，使用IPv4地址
+   *
+   * \param videoIp 视频服务器的IPv4地址
+   * \param videoPort 视频服务器的端口号
+   * \param audioIp 音频服务器的IPv4地址
+   * \param audioPort 音频服务器的端口号
+   */
+  MultiTcpAvStreamClientHelper(Ipv4Address videoIp, uint16_t videoPort, Ipv4Address audioIp,
+                               uint16_t audioPort);
+
+  /**
+   * 创建MultiTcpAvStreamClientHelper，使用IPv6地址
+   *
+   * \param videoIp 视频服务器的IPv6地址
+   * \param videoPort 视频服务器的端口号
+   * \param audioIp 音频服务器的IPv6地址
+   * \param audioPort 音频服务器的端口号
+   */
+  MultiTcpAvStreamClientHelper(Ipv6Address videoIp, uint16_t videoPort, Ipv6Address audioIp,
+                               uint16_t audioPort);
+
+  /**
+   * 设置在每个应用创建后要配置的属性
+   *
+   * \param name 要设置的属性名称
+   * \param value 要设置的属性值
+   */
+  void SetAttribute(std::string name, const AttributeValue &value);
+
+  /**
+   * \param clients 节点及其对应使用的自适应算法名称
+   *
+   * 在输入节点上为每个节点创建一个多TCP流AV客户端应用，
+   * 并根据给定字符串在每个客户端上实例化自适应算法
+   *
+   * \returns 返回创建的应用，每个输入节点一个应用
+   */
+  ApplicationContainer Install(std::vector<std::pair<Ptr<Node>, std::string> > clients) const;
+
+  /**
+   * 在单个节点上安装客户端应用
+   * \param node 目标节点
+   * \param algo 自适应算法名称
+   * \param clientId 客户端ID
+   * \returns 返回安装的应用指针
+   */
+  Ptr<Application> InstallSingleClient(Ptr<Node> node, std::string algo, uint16_t clientId) const;
+
+  /**
+   * 批量安装客户端应用到节点容器
+   * \param nodes 节点容器
+   * \param algo 自适应算法名称（所有客户端使用相同算法）
+   * \returns 返回应用容器
+   */
+  ApplicationContainer InstallBatch(NodeContainer nodes, std::string algo) const;
+
+ private:
+  /**
+   * 在节点上安装一个ns3::MultiTcpAvStreamClient，并使用SetAttribute设置的所有属性
+   *
+   * \param node 要安装MultiTcpAvStreamClient的节点
+   * \param algo 包含该客户端使用的自适应算法名称的字符串
+   * \param clientId 用于日志区分不同客户端对象
+   * \returns 返回安装的应用Ptr
+   */
+  Ptr<Application> InstallPriv(Ptr<Node> node, std::string algo, uint16_t clientId) const;
+
+  ObjectFactory m_factory;  //!< 对象工厂
+  Address m_videoAddress;   //!< 视频服务器地址
+  uint16_t m_videoPort;     //!< 视频服务器端口
+  Address m_audioAddress;   //!< 音频服务器地址
+  uint16_t m_audioPort;     //!< 音频服务器端口
+};
 
 }  // namespace ns3
+
+#endif /* MULTI_AV_STREAM_HELPER_H */

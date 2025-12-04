@@ -1,18 +1,3 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * 版权所有 2016 Technische Universitaet Berlin
- *
- * 本程序是自由软件；你可以根据 GNU 通用公共许可证第 2 版
- * （由自由软件基金会发布）重新分发和/或修改它。
- *
- * 本程序按“希望有用”的原则分发，但不提供任何保证，
- * 包括对适销性或特定用途适用性的隐含保证。
- *
- * 你应该已经收到了一份 GNU 通用公共许可证的副本，
- * 如果没有，请写信至自由软件基金会，地址：
- * 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
-
 // 包含服务器类的头文件
 #include "tcp-stream-server.h"
 

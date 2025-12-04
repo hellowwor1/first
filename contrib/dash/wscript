@@ -11,6 +11,9 @@ def build(bld):
         'model/panda.cc',
         'model/tobasco2.cc',
         'helper/tcp-stream-helper.cc',
+        'model/multi-av-stream-client.cc',
+        'model/multi-av-stream-server.cc',
+        'helper/multi-av-stream-helper.cc',
         ]
 
     headers = bld(features='ns3header')
@@ -24,6 +27,9 @@ def build(bld):
         'model/panda.h',
         'model/tobasco2.h',
         'helper/tcp-stream-helper.h',
+        'model/multi-av-stream-client.h',
+        'model/multi-av-stream-server.h',
+        'helper/multi-av-stream-helper.h',
         ]
 
     if bld.env['ENABLE_EXAMPLES']:

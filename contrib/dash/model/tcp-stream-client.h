@@ -1,16 +1,3 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * Copyright 2016 Technische Universitaet Berlin
- *
- * 本程序是自由软件，你可以在遵守 GNU 通用公共许可证版本2
- * 的条款下重新分发和修改它。
- *
- * 本程序的发布是希望它对你有用，但不提供任何保证，包括对适销性或特定用途适用性的隐含保证。
- *
- * 你应该已经收到了一份 GNU 通用公共许可证的副本，如果没有，请联系 Free Software
- * Foundation。
- */
-
 #ifndef TCP_STREAM_CLIENT_H
 #define TCP_STREAM_CLIENT_H
 
@@ -84,24 +71,13 @@ class TcpStreamClient : public Application {
   /**
    * \brief 定义客户端状态机的状态。
    */
-  enum controllerState {
-    initial,
-    downloading,
-    downloadingPlaying,
-    playing,
-    terminal
-  };
+  enum controllerState { initial, downloading, downloadingPlaying, playing, terminal };
   controllerState state;
 
   /**
    * \brief 定义客户端状态机的事件。
    */
-  enum controllerEvent {
-    downloadFinished,
-    playbackFinished,
-    irdFinished,
-    init
-  };
+  enum controllerEvent { downloadFinished, playbackFinished, irdFinished, init };
   AdaptationAlgorithm *algo;
 
   virtual void StartApplication(void);
@@ -238,8 +214,8 @@ class TcpStreamClient : public Application {
    *
    * 打开 TcpStreamClient 定义的输出流，并创建包含使用算法的日志文件。
    */
-  void InitializeLogFiles(std::string simulationId, std::string clientId,
-                          std::string numberOfClients);
+  void
+  InitializeLogFiles(std::string simulationId, std::string clientId, std::string numberOfClients);
 
   uint32_t m_dataSize;  //!< 包负载大小
   uint8_t *m_data;      //!< 包负载数据
@@ -254,8 +230,7 @@ class TcpStreamClient : public Application {
   /*
       添加音频、视频块文件的路径
   */
-  std::string
-      m_segmentSizeFilePath;  //!< 包含段大小文件的路径（相对于 ns-3.x 目录）
+  std::string m_segmentSizeFilePath;  //!< 包含段大小文件的路径（相对于 ns-3.x 目录）
   std::string m_videosegmentSizeFilePath;
   std::string m_audiosegmentSizeFilePath;
 
@@ -269,9 +244,9 @@ class TcpStreamClient : public Application {
   int64_t m_transmissionStartReceivingSegment;  //!< 段传输开始时间（微秒）
   int64_t m_transmissionEndReceivingSegment;    //!< 段传输结束时间（微秒）
   int64_t m_bytesReceived;                      //!< 当前包已接收字节数
-  int64_t m_bDelay;            //!< 播放时最小缓冲区水平，下一下载开始前
-  int64_t m_highestRepIndex;   //!< 最高表示级别索引
-  uint64_t m_segmentDuration;  //!< 段持续时间（微秒）
+  int64_t m_bDelay;                             //!< 播放时最小缓冲区水平，下一下载开始前
+  int64_t m_highestRepIndex;                    //!< 最高表示级别索引
+  uint64_t m_segmentDuration;                   //!< 段持续时间（微秒）
 
   std::ofstream adaptationLog;      //!< 自适应日志输出流
   std::ofstream downloadLog;        //!< 下载日志输出流
