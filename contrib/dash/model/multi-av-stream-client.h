@@ -64,15 +64,28 @@ class MultiTcpAvStreamClient : public Application {
 
   /**
    * \brief 设置视频服务器的远程地址和端口（通用地址类型）
-   * \param ip 视频服务器的地址
+   * \param ip 视频服务器的地址IPv6
    * \param port 视频服务器的端口
+   */
+  void SetVideoRemote(Ipv6Address ip, uint16_t port);
+
+  /**
+   * \brief 设置音频服务器的远程地址和端口（通用地址类型）
+   * \param ip 音频服务器的地址IPv6
+   * \param port 音频服务器的端口
+   */
+  void SetAudioRemote(Ipv6Address ip, uint16_t port);
+  /**
+   * \brief 设置远程地址和端口
+   * \param ip 远程 IP 地址
+   * \param port 远程端口
    */
   void SetVideoRemote(Address ip, uint16_t port);
 
   /**
-   * \brief 设置音频服务器的远程地址和端口（通用地址类型）
-   * \param ip 音频服务器的地址
-   * \param port 音频服务器的端口
+   * \brief 设置远程地址和端口
+   * \param ip 远程 IP 地址
+   * \param port 远程端口
    */
   void SetAudioRemote(Address ip, uint16_t port);
 
@@ -92,8 +105,7 @@ class MultiTcpAvStreamClient : public Application {
     playing,             //!< 只播放状态
     terminal             //!< 终止状态
   };
-
-  controllerState state;  //!< 当前状态机状态
+  // controllerState state;  //!< 当前状态机状态
 
   /**
    * \brief 定义客户端状态机的事件
@@ -114,42 +126,67 @@ class MultiTcpAvStreamClient : public Application {
   };
 
   /**
+   * \brief 客户端需要请求哪些数据
+   */
+  enum StreamSelection {
+    VIDEO_ONLY,  //!< 只请求视频
+    AUDIO_ONLY,  //!< 只请求音频
+    AUDIO_VIDEO  //!< 请求音视频
+  };
+
+  /**
    * \brief 管理每个流数据的结构体
    */
   struct StreamData {
-    AdaptationAlgorithm* algo;  //!< 流使用的自适应算法
-    Ptr<Socket> socket;         //!< 流的套接字
-    Address peerAddress;        //!< 远程服务器地址
-    uint16_t peerPort;          //!< 远程服务器端口
-    std::string streamType;     //!< 流类型字符串："video" 或 "audio"
-    StreamType type;            //!< 流类型枚举
+    uint32_t m_dataSize;  //!< 包负载大小
+    uint8_t* m_data;      //!< 包负载数据
 
-    // 视频数据相关
-    videoData m_video;  //!< 视频段信息
-    audioData m_audio;
-    int64_t currentRepIndex;                    //!< 当前码率索引
-    int64_t segmentCounter;                     //!< 已下载段计数器
-    int64_t bytesReceived;                      //!< 当前段已接收字节数
-    int64_t transmissionStartReceivingSegment;  //!< 当前段接收开始时间
-    int64_t transmissionEndReceivingSegment;    //!< 当前段接收结束时间
-    int64_t downloadRequestSent;                //!< 下载请求发送时间
+    Ptr<Socket> m_socket;   //!< 流的套接字
+    Address m_peerAddress;  //!< 远程服务器地址
+    uint16_t m_peerPort;    //!< 远程服务器端口
+    StreamType m_type;      //!< 流类型枚举
+
+    std::string
+        m_segmentSizeFilePath;  //!< 包含段大小文件的路径（相对于 ns-3.x 目录）
+
+    AdaptationAlgorithm* algo;  //!< 流使用的自适应算法
+    std::string m_algoName;     //!< 流使用的算法名称
+    // 播放相关状态
+    bool m_bufferUnderrun;           //!< 是否发生缓冲区下溢
+    int64_t m_currentPlaybackIndex;  //!< 当前播放段索引
+    int64_t m_segmentsInBuffer;      //!< 缓冲区内段数
+    int64_t m_currentRepIndex;       //!< 当前请求段质量索引
+    int64_t m_lastSegmentIndex;      //!< 最后一个段索引，总段数-1
+    int64_t m_segmentCounter;        //!< 下一个下载段索引
+
+    int64_t m_transmissionStartReceivingSegment;  //!< 段传输开始时间（微秒）
+    int64_t m_transmissionEndReceivingSegment;    //!< 段传输结束时间（微秒）
+    int64_t m_bytesReceived;                      //!< 当前包已接收字节数
+    int64_t m_bDelay;           //!< 播放时最小缓冲区水平，下一下载开始前
+    int64_t m_highestRepIndex;  //!< 最高表示级别索引
+    uint64_t m_segmentDuration;
+
+    // 日志文件
+    // 暂时缺少一个自适应的码率日志输出流
+    std::ofstream downloadLog;        //!< 下载日志文件流
+    std::ofstream playbackLog;        //!< 播放日志文件流
+    std::ofstream adaptationLog;      //!< 自适应算法日志文件流
+    std::ofstream bufferLog;          //!< 缓冲区日志文件流
+    std::ofstream throughputLog;      //!< 吞吐量日志文件流
+    std::ofstream bufferUnderrunLog;  //!< 缓冲区下溢日志输出流
+
+    int64_t m_downloadRequestSent;  //!< 下载请求发送时间
 
     // 吞吐量和缓冲区数据
     throughputData m_throughput;  //!< 吞吐量跟踪数据
-    bufferData m_buffer;          //!< 缓冲区跟踪数据
-    playbackData m_playback;      //!< 播放跟踪数据
+    bufferData m_bufferData;      //!< 缓冲区跟踪数据
+    playbackData m_playbackData;  //!< 播放跟踪数据
 
-    // 统计信息
-    int64_t lastSegmentIndex;  //!< 最后一个段索引
-    int64_t highestRepIndex;   //!< 最高码率索引
-    uint64_t segmentDuration;  //!< 段持续时间（微秒）
+    videoData m_segmentData;  //!< 段信息
 
-    // 日志文件
-    std::ofstream downloadLog;    //!< 下载日志文件流
-    std::ofstream playbackLog;    //!< 播放日志文件流
-    std::ofstream adaptationLog;  //!< 自适应算法日志文件流
-    std::ofstream bufferLog;      //!< 缓冲区日志文件流
-    std::ofstream throughputLog;  //!< 吞吐量日志文件流
+    controllerState state;  //!< 当前状态机状态
+
+    bool m_SegmentReceived;  //!< 段是否已接收
   };
 
   virtual void StartApplication(void);
@@ -158,7 +195,12 @@ class MultiTcpAvStreamClient : public Application {
   // 主控制器状态机
   void Controller(controllerEvent action);
 
+  void MultiTcpAvStreamClient::DownloadController(controllerEvent event,
+                                                  StreamType type);
+  void MultiTcpAvStreamClient::PlaybackController(controllerEvent event);
+
   /**
+   * 设置包数据内容，将 T & message 字符串的以零结尾内容填充到 m_data 中
    * \brief 准备发送的数据包
    * \param message 要发送的消息（字节数）
    */
@@ -169,9 +211,10 @@ class MultiTcpAvStreamClient : public Application {
    * \brief 向指定流发送数据包
    * \param message 要发送的消息（字节数）
    * \param streamType 流类型
+   * 发送前会调用 PreparePacket(T & message) 填充数据，包含请求的字节数。
    */
   template <typename T>
-  void Send(T& message, StreamType streamType);
+  void Send(T& message, Ptr<Socket> socket);
 
   /**
    * \brief 处理数据包接收
@@ -200,6 +243,12 @@ class MultiTcpAvStreamClient : public Application {
   void ConnectionSucceeded(Ptr<Socket> socket);
 
   /**
+   * \brief 连接成功调用控制器
+   * \param type 流类型
+   */
+  void StartStreamController(StreamType type);
+
+  /**
    * \brief 连接失败回调
    * \param socket 连接失败的套接字
    */
@@ -208,14 +257,15 @@ class MultiTcpAvStreamClient : public Application {
   /**
    * \brief 处理段接收完成
    * \param streamType 完成接收的流类型
+   * 当段完整接收后调用，即接收的字节数等于请求的字节数。记录吞吐量和缓冲区数据。
    */
   void SegmentReceivedHandle(StreamType streamType);
 
   /**
    * \brief 为指定流请求下一个码率索引
-   * \param streamType 流类型
+   * \param streamdata 流
    */
-  void RequestRepIndex(StreamType streamType);
+  void RequestRepIndex(StreamData* streamData);
 
   /**
    * \brief 读取视频段大小文件
@@ -261,7 +311,7 @@ class MultiTcpAvStreamClient : public Application {
    * \param answer 算法返回结果
    * \param streamType 流类型
    */
-  void LogAdaptation(algorithmReply answer, StreamType streamType);
+  void LogAdaptation(algorithmReply answer, StreamData* streamData);
 
   /**
    * \brief 初始化所有日志文件
@@ -269,8 +319,8 @@ class MultiTcpAvStreamClient : public Application {
    * \param clientId 客户端ID
    * \param numberOfClients 客户端总数
    */
-  void
-  InitializeLogFiles(std::string simulationId, std::string clientId, std::string numberOfClients);
+  void InitializeLogFiles(std::string simulationId, std::string clientId,
+                          std::string numberOfClients);
 
   /**
    * \brief 检查两个流是否都已连接
@@ -284,6 +334,7 @@ class MultiTcpAvStreamClient : public Application {
    */
   bool BothSegmentsReceived();
 
+  // 客户端发送的数据包
   uint32_t m_dataSize;  //!< 数据包负载大小
   uint8_t* m_data;      //!< 数据包负载数据
 
@@ -294,33 +345,25 @@ class MultiTcpAvStreamClient : public Application {
   StreamData m_audioStream;  //!< 音频流数据
 
   // 视频服务器地址/端口
-  Address GetVideoRemoteAddress() const { return m_videoStream.peerAddress; }
-  void SetVideoRemoteAddress(Address a) { m_videoStream.peerAddress = a; }
+  Address GetVideoRemoteAddress() const { return m_videoStream.m_peerAddress; }
+  void SetVideoRemoteAddress(Address a) { m_videoStream.m_peerAddress = a; }
 
-  uint16_t GetVideoRemotePort() const { return m_videoStream.peerPort; }
-  void SetVideoRemotePort(uint16_t p) { m_videoStream.peerPort = p; }
+  uint16_t GetVideoRemotePort() const { return m_videoStream.m_peerPort; }
+  void SetVideoRemotePort(uint16_t p) { m_videoStream.m_peerPort = p; }
 
   // 音频服务器地址/端口
-  Address GetAudioRemoteAddress() const { return m_audioStream.peerAddress; }
-  void SetAudioRemoteAddress(Address a) { m_audioStream.peerAddress = a; }
+  Address GetAudioRemoteAddress() const { return m_audioStream.m_peerAddress; }
+  void SetAudioRemoteAddress(Address a) { m_audioStream.m_peerAddress = a; }
 
-  uint16_t GetAudioRemotePort() const { return m_audioStream.peerPort; }
-  void SetAudioRemotePort(uint16_t p) { m_audioStream.peerPort = p; }
+  uint16_t GetAudioRemotePort() const { return m_audioStream.m_peerPort; }
+  void SetAudioRemotePort(uint16_t p) { m_audioStream.m_peerPort = p; }
 
-  // 段持续时间
-  uint64_t GetSegmentDuration() const { return m_videoStream.segmentDuration; }
-  void SetSegmentDuration(uint64_t d) { m_videoStream.segmentDuration = d; }
-
-  uint16_t m_clientId;         //!< 客户端ID
-  uint16_t m_simulationId;     //!< 仿真ID
-  uint16_t m_numberOfClients;  //!< 客户端总数
+  uint16_t m_clientId;                //!< 客户端ID
+  uint16_t m_simulationId;            //!< 仿真ID
+  uint16_t m_numberOfClients;         //!< 客户端总数
+  StreamSelection m_streamSelection;  //!< 请求数据类型
 
   std::string m_algoName;  //!< 使用的自适应算法名称
-
-  // 播放相关状态
-  bool m_bufferUnderrun;           //!< 是否发生缓冲区下溢
-  int64_t m_currentPlaybackIndex;  //!< 当前播放段索引
-  int64_t m_segmentsInBuffer;      //!< 缓冲区内段数
 
   // 流连接状态
   bool m_videoConnected;  //!< 视频流是否已连接
@@ -334,11 +377,9 @@ class MultiTcpAvStreamClient : public Application {
   std::string m_videoSegmentSizeFilePath;  //!< 视频段大小文件路径
   std::string m_audioSegmentSizeFilePath;  //!< 音频段大小文件路径
 
-  // 缓冲区下溢日志
-  std::ofstream bufferUnderrunLog;  //!< 缓冲区下溢日志文件流
-
   // 播放延迟（取两个流中的最大值）
-  int64_t m_bDelay;  //!< 播放时最小缓冲区水平，下一下载开始前
+  int64_t m_bDelay;            //!< 播放时最小缓冲区水平，下一下载开始前
+  uint64_t m_segmentDuration;  //!< 段持续时间（微秒）
 };
 
 }  // namespace ns3

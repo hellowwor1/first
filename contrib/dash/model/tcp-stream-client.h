@@ -71,13 +71,24 @@ class TcpStreamClient : public Application {
   /**
    * \brief 定义客户端状态机的状态。
    */
-  enum controllerState { initial, downloading, downloadingPlaying, playing, terminal };
+  enum controllerState {
+    initial,
+    downloading,
+    downloadingPlaying,
+    playing,
+    terminal
+  };
   controllerState state;
 
   /**
    * \brief 定义客户端状态机的事件。
    */
-  enum controllerEvent { downloadFinished, playbackFinished, irdFinished, init };
+  enum controllerEvent {
+    downloadFinished,
+    playbackFinished,
+    irdFinished,
+    init
+  };
   AdaptationAlgorithm *algo;
 
   virtual void StartApplication(void);
@@ -93,19 +104,18 @@ class TcpStreamClient : public Application {
    * - 初始化日志文件。
    *
    * 初始化完成后，客户端会建立 TCP 连接，并设置连接成功和接收回调。
-   * 然后控制器通过调用 RequestRepIndex() 进行状态转换 initial
-   * init->downloading，从自适应算法获取下一个下载段的表示级别。
-   * 客户端向服务器发送请求，包含需要下载段的字节数。服务器处理请求并开始发送
-   * TCP 包。 当包到达时触发
-   * SetRecvCallback，客户端接收数据，并记录所有到达的数据包。
-   * 当接收到的数据量等于请求的段大小时，记录吞吐量并调用控制器事件
-   * downloadFinished。 控制器将段加入缓冲区，并调用 PlaybackHandle() 模拟播放。
+   * 然后控制器通过调用 RequestRepIndex() 进行状态转换
+   * initialinit->downloading，从自适应算法获取下一个下载段的表示级别。
+   * 客户端向服务器发送请求，包含需要下载段的字节数，服务器处理请求并开始发送TCP包。
+   * 当包到达时触发SetRecvCallback，客户端接收数据，并记录所有到达的数据包。
+   * 当接收到的数据量等于请求的段大小时，记录吞吐量并调用控制器事件downloadFinished
+   * 控制器将段加入缓冲区，并调用 PlaybackHandle() 模拟播放。
    * 定时器触发下一个 PlaybackHandle()，继续请求下一个段。状态机在 downloading
    * 和 downloadingPlaying 状态之间切换，直到所有段播放完毕。
    */
   void Controller(controllerEvent action);
   /**
-   * 设置包数据内容，将 T & message 字符串的零结尾内容填充到 m_data 中。
+   * 设置包数据内容，将 T & message 字符串的以零结尾内容填充到 m_data 中。
    *
    * \param message 客户端请求服务器发送的字节数。
    */
@@ -214,8 +224,8 @@ class TcpStreamClient : public Application {
    *
    * 打开 TcpStreamClient 定义的输出流，并创建包含使用算法的日志文件。
    */
-  void
-  InitializeLogFiles(std::string simulationId, std::string clientId, std::string numberOfClients);
+  void InitializeLogFiles(std::string simulationId, std::string clientId,
+                          std::string numberOfClients);
 
   uint32_t m_dataSize;  //!< 包负载大小
   uint8_t *m_data;      //!< 包负载数据
@@ -230,23 +240,25 @@ class TcpStreamClient : public Application {
   /*
       添加音频、视频块文件的路径
   */
-  std::string m_segmentSizeFilePath;  //!< 包含段大小文件的路径（相对于 ns-3.x 目录）
+  std::string
+      m_segmentSizeFilePath;  //!< 包含段大小文件的路径（相对于 ns-3.x 目录）
   std::string m_videosegmentSizeFilePath;
   std::string m_audiosegmentSizeFilePath;
 
-  std::string m_algoName;                       //!< 客户端使用的自适应算法名称
-  bool m_bufferUnderrun;                        //!< 是否发生缓冲区下溢
-  int64_t m_currentPlaybackIndex;               //!< 当前播放段索引
-  int64_t m_segmentsInBuffer;                   //!< 缓冲区内段数
-  int64_t m_currentRepIndex;                    //!< 当前请求段质量索引
-  int64_t m_lastSegmentIndex;                   //!< 最后一个段索引，总段数-1
-  int64_t m_segmentCounter;                     //!< 下一个下载段索引
+  std::string m_algoName;          //!< 客户端使用的自适应算法名称
+  bool m_bufferUnderrun;           //!< 是否发生缓冲区下溢
+  int64_t m_currentPlaybackIndex;  //!< 当前播放段索引
+  int64_t m_segmentsInBuffer;      //!< 缓冲区内段数
+  int64_t m_currentRepIndex;       //!< 当前请求段质量索引
+  int64_t m_lastSegmentIndex;      //!< 最后一个段索引，总段数-1
+  int64_t m_segmentCounter;        //!< 下一个下载段索引
+
   int64_t m_transmissionStartReceivingSegment;  //!< 段传输开始时间（微秒）
   int64_t m_transmissionEndReceivingSegment;    //!< 段传输结束时间（微秒）
   int64_t m_bytesReceived;                      //!< 当前包已接收字节数
-  int64_t m_bDelay;                             //!< 播放时最小缓冲区水平，下一下载开始前
-  int64_t m_highestRepIndex;                    //!< 最高表示级别索引
-  uint64_t m_segmentDuration;                   //!< 段持续时间（微秒）
+  int64_t m_bDelay;            //!< 播放时最小缓冲区水平，下一下载开始前
+  int64_t m_highestRepIndex;   //!< 最高表示级别索引
+  uint64_t m_segmentDuration;  //!< 段持续时间（微秒）
 
   std::ofstream adaptationLog;      //!< 自适应日志输出流
   std::ofstream downloadLog;        //!< 下载日志输出流
