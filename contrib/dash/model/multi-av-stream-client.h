@@ -193,7 +193,7 @@ class MultiTcpAvStreamClient : public Application {
   virtual void StopApplication(void);
 
   // 主控制器状态机
-  void Controller(controllerEvent action);
+  void Controller(controllerEvent event, StreamType type);
 
   void MultiTcpAvStreamClient::DownloadController(controllerEvent event,
                                                   StreamType type);
@@ -276,10 +276,26 @@ class MultiTcpAvStreamClient : public Application {
   int ReadInBitrateValues(std::string segmentSizeFile, bool isVideo);
 
   /**
-   * \brief 控制/模拟播放过程
-   * \return true 表示发生缓冲区下溢
+   * \brief AV 同步播放：当 A/V都启用时，
+   * 统一调用此函数进行同时播放并记录时间上面的播放差异。
+   * \return false 表示成功播放（双方都播放了一段），true 表示未播放。
    */
-  bool PlaybackHandle();
+  bool PlaybackHandleAV();
+
+  /**
+   * \brief 对单个流控制/模拟播放过程
+   * \param stream 流数据
+   * \return false 表示成功播放了一个 segment，true 表示没有播放（buffer
+   *          underrun / 等待）
+   */
+  bool MultiTcpAvStreamClient::PlaybackHandleSingle(StreamData& stream);
+
+  /**
+   * \brief 判断流的缓冲区是否耗尽
+   * \param stream 流数据类型
+   * \return false 表示没有耗尽，true 表示耗尽了
+   */
+  bool MultiTcpAvStreamClient::IsBufferEmpty(StreamType type);
 
   /**
    * \brief 记录指定流的下载信息
@@ -377,9 +393,11 @@ class MultiTcpAvStreamClient : public Application {
   std::string m_videoSegmentSizeFilePath;  //!< 视频段大小文件路径
   std::string m_audioSegmentSizeFilePath;  //!< 音频段大小文件路径
 
-  // 播放延迟（取两个流中的最大值）
-  int64_t m_bDelay;            //!< 播放时最小缓冲区水平，下一下载开始前
+  int64_t m_bDelay;            //!< 缓冲区数据不够，网络太差时，暂停请求的时间
   uint64_t m_segmentDuration;  //!< 段持续时间（微秒）
+
+  std::ofstream m_avSyncLog;             //!< 记录同步/不同步的情况
+  const int64_t m_syncWindowUs = 50000;  // 50 ms 的宽松窗口（微秒）
 };
 
 }  // namespace ns3

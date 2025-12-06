@@ -18,7 +18,8 @@ NS_LOG_COMPONENT_DEFINE("MultiTcpAvStreamHelper");
 // ==================== MultiTcpAvStreamServerHelper 部分 ====================
 
 // 构造函数：创建MultiTcpAvStreamServerHelper对象，指定视频和音频端口
-MultiTcpAvStreamServerHelper::MultiTcpAvStreamServerHelper(uint16_t videoPort, uint16_t audioPort)
+MultiTcpAvStreamServerHelper::MultiTcpAvStreamServerHelper(uint16_t videoPort,
+                                                           uint16_t audioPort)
     : m_videoPort(videoPort),     // 初始化视频端口
       m_audioPort(audioPort),     // 初始化音频端口
       m_useDefaultPorts(false) {  // 标记为使用指定端口
@@ -44,18 +45,21 @@ MultiTcpAvStreamServerHelper::MultiTcpAvStreamServerHelper()
 }
 
 // 设置服务器属性（通用接口）
-void MultiTcpAvStreamServerHelper::SetAttribute(std::string name, const AttributeValue &value) {
+void MultiTcpAvStreamServerHelper::SetAttribute(std::string name,
+                                                const AttributeValue &value) {
   m_factory.Set(name, value);  // 将属性名和属性值记录到对象工厂中
 }
 
 // 在指定节点上安装服务器应用
-ApplicationContainer MultiTcpAvStreamServerHelper::Install(Ptr<Node> node) const {
+ApplicationContainer
+MultiTcpAvStreamServerHelper::Install(Ptr<Node> node) const {
   // 调用私有函数InstallPriv并返回封装好的ApplicationContainer
   return ApplicationContainer(InstallPriv(node));
 }
 
 // 在指定名称的节点上安装服务器应用
-ApplicationContainer MultiTcpAvStreamServerHelper::Install(std::string nodeName) const {
+ApplicationContainer
+MultiTcpAvStreamServerHelper::Install(std::string nodeName) const {
   // 通过节点名称查找节点对象
   Ptr<Node> node = Names::Find<Node>(nodeName);
   // 调用InstallPriv安装并返回应用容器
@@ -63,7 +67,8 @@ ApplicationContainer MultiTcpAvStreamServerHelper::Install(std::string nodeName)
 }
 
 // 在NodeContainer中的每个节点上安装服务器应用
-ApplicationContainer MultiTcpAvStreamServerHelper::Install(NodeContainer c) const {
+ApplicationContainer
+MultiTcpAvStreamServerHelper::Install(NodeContainer c) const {
   ApplicationContainer apps;  // 创建空的ApplicationContainer
   // 遍历NodeContainer中的每个节点
   for (NodeContainer::Iterator i = c.Begin(); i != c.End(); ++i) {
@@ -73,42 +78,9 @@ ApplicationContainer MultiTcpAvStreamServerHelper::Install(NodeContainer c) cons
   return apps;  // 返回所有安装好的应用容器
 }
 
-// 安装视频服务器到指定节点
-Ptr<Application>
-MultiTcpAvStreamServerHelper::InstallVideoServer(Ptr<Node> node, uint16_t videoPort) const {
-  // 创建对象工厂并设置类型
-  ObjectFactory factory;
-  factory.SetTypeId(MultiTcpAvStreamServer::GetTypeId());
-  // 设置视频端口属性
-  factory.Set("VideoPort", UintegerValue(videoPort));
-  factory.Set("AudioPort", UintegerValue(0));  // 音频端口设为0表示不启用
-
-  // 使用工厂创建MultiTcpAvStreamServer对象
-  Ptr<Application> app = factory.Create<MultiTcpAvStreamServer>();
-  // 将创建的服务器应用添加到节点中
-  node->AddApplication(app);
-  return app;  // 返回应用指针
-}
-
-// 安装音频服务器到指定节点
-Ptr<Application>
-MultiTcpAvStreamServerHelper::InstallAudioServer(Ptr<Node> node, uint16_t audioPort) const {
-  // 创建对象工厂并设置类型
-  ObjectFactory factory;
-  factory.SetTypeId(MultiTcpAvStreamServer::GetTypeId());
-  // 设置音频端口属性
-  factory.Set("VideoPort", UintegerValue(0));  // 视频端口设为0表示不启用
-  factory.Set("AudioPort", UintegerValue(audioPort));
-
-  // 使用工厂创建MultiTcpAvStreamServer对象
-  Ptr<Application> app = factory.Create<MultiTcpAvStreamServer>();
-  // 将创建的服务器应用添加到节点中
-  node->AddApplication(app);
-  return app;  // 返回应用指针
-}
-
 // 私有函数：实际创建服务器应用并添加到节点
-Ptr<Application> MultiTcpAvStreamServerHelper::InstallPriv(Ptr<Node> node) const {
+Ptr<Application>
+MultiTcpAvStreamServerHelper::InstallPriv(Ptr<Node> node) const {
   // 使用工厂创建MultiTcpAvStreamServer对象
   Ptr<Application> app = m_factory.Create<MultiTcpAvStreamServer>();
   // 将创建的服务器应用添加到节点中
@@ -119,8 +91,10 @@ Ptr<Application> MultiTcpAvStreamServerHelper::InstallPriv(Ptr<Node> node) const
 // ==================== MultiTcpAvStreamClientHelper 部分 ====================
 
 // 构造函数：指定视频和音频服务器的Address类型IP和端口
-MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Address videoAddress, uint16_t videoPort,
-                                                           Address audioAddress, uint16_t audioPort)
+MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Address videoAddress,
+                                                           uint16_t videoPort,
+                                                           Address audioAddress,
+                                                           uint16_t audioPort)
     : m_videoAddress(videoAddress),  // 初始化视频服务器地址
       m_videoPort(videoPort),        // 初始化视频服务器端口
       m_audioAddress(audioAddress),  // 初始化音频服务器地址
@@ -138,8 +112,10 @@ MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Address videoAddress,
 }
 
 // 构造函数：指定视频和音频服务器的IPv4地址和端口
-MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Ipv4Address videoIp, uint16_t videoPort,
-                                                           Ipv4Address audioIp, uint16_t audioPort)
+MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Ipv4Address videoIp,
+                                                           uint16_t videoPort,
+                                                           Ipv4Address audioIp,
+                                                           uint16_t audioPort)
     : m_videoAddress(Address(videoIp)),  // 将IPv4地址转换为通用Address类型
       m_videoPort(videoPort),            // 初始化视频服务器端口
       m_audioAddress(Address(audioIp)),  // 将IPv4地址转换为通用Address类型
@@ -157,8 +133,10 @@ MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Ipv4Address videoIp, 
 }
 
 // 构造函数：指定视频和音频服务器的IPv6地址和端口
-MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Ipv6Address videoIp, uint16_t videoPort,
-                                                           Ipv6Address audioIp, uint16_t audioPort)
+MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Ipv6Address videoIp,
+                                                           uint16_t videoPort,
+                                                           Ipv6Address audioIp,
+                                                           uint16_t audioPort)
     : m_videoAddress(Address(videoIp)),  // 将IPv6地址转换为通用Address类型
       m_videoPort(videoPort),            // 初始化视频服务器端口
       m_audioAddress(Address(audioIp)),  // 将IPv6地址转换为通用Address类型
@@ -176,7 +154,8 @@ MultiTcpAvStreamClientHelper::MultiTcpAvStreamClientHelper(Ipv6Address videoIp, 
 }
 
 // 设置客户端属性（通用接口）
-void MultiTcpAvStreamClientHelper::SetAttribute(std::string name, const AttributeValue &value) {
+void MultiTcpAvStreamClientHelper::SetAttribute(std::string name,
+                                                const AttributeValue &value) {
   m_factory.Set(name, value);  // 将属性名和属性值记录到对象工厂
 }
 
@@ -192,54 +171,19 @@ ApplicationContainer MultiTcpAvStreamClientHelper::Install(
   return apps;  // 返回所有安装好的客户端应用
 }
 
-// 在单个节点上安装客户端应用
-Ptr<Application> MultiTcpAvStreamClientHelper::InstallSingleClient(Ptr<Node> node, std::string algo,
-                                                                   uint16_t clientId) const {
-  // 直接调用私有安装函数
-  return InstallPriv(node, algo, clientId);
-}
-
-// 批量安装客户端应用到节点容器
-ApplicationContainer
-MultiTcpAvStreamClientHelper::InstallBatch(NodeContainer nodes, std::string algo) const {
-  ApplicationContainer apps;  // 创建空的应用容器
-  uint32_t clientId = 0;      // 客户端ID计数器
-
-  // 遍历节点容器中的每个节点
-  for (NodeContainer::Iterator i = nodes.Begin(); i != nodes.End(); ++i) {
-    // 为每个节点安装客户端应用
-    apps.Add(InstallPriv(*i, algo, clientId));
-    clientId++;  // 递增客户端ID
-  }
-
-  return apps;  // 返回所有安装好的客户端应用
-}
-
 // 私有函数：在节点上安装客户端应用并初始化自适应算法
-Ptr<Application> MultiTcpAvStreamClientHelper::InstallPriv(Ptr<Node> node, std::string algo,
-                                                           uint16_t clientId) const {
+Ptr<Application>
+MultiTcpAvStreamClientHelper::InstallPriv(Ptr<Node> node, std::string algo,
+                                          uint16_t clientId) const {
   // 使用工厂创建MultiTcpAvStreamClient对象
   Ptr<Application> app = m_factory.Create<MultiTcpAvStreamClient>();
 
   // 获取MultiTcpAvStreamClient指针
   Ptr<MultiTcpAvStreamClient> client = app->GetObject<MultiTcpAvStreamClient>();
-
-  if (client) {
-    // 设置客户端ID，用于日志区分
-    client->SetAttribute("ClientId", UintegerValue(clientId));
-
-    // 初始化自适应算法
-    client->Initialise(algo, clientId);
-
-    // 记录安装信息
-    NS_LOG_INFO("Installed MultiTcpAvStreamClient on node "
-                << node->GetId() << " with algorithm " << algo << " and clientId " << clientId
-                << ", connecting to video server " << m_videoAddress << ":" << m_videoPort
-                << " and audio server " << m_audioAddress << ":" << m_audioPort);
-  } else {
-    NS_LOG_ERROR("Failed to create MultiTcpAvStreamClient object");
-  }
-
+  // 设置客户端ID，用于日志区分
+  client->SetAttribute("ClientId", UintegerValue(clientId));
+  // 初始化自适应算法
+  client->Initialise(algo, clientId);
   // 将客户端应用添加到节点
   node->AddApplication(app);
   return app;  // 返回应用指针

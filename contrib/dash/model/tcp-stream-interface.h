@@ -89,11 +89,13 @@ struct segmentData {
  *  \brief 存储播放数据
  *
  * 包含一对值：
- * - playbackIndex 表示片段索引（乘以片段时长得到视频时间轴位置）
+ * - playbackIndex 表示码率索引
  * - playbackStart 表示该片段在模拟时间中的播放开始时间（微秒）
  */
 struct playbackData {
-  std::vector<int64_t> playbackIndex;  //!< 视频片段索引
+  std::vector<int64_t> playbackIndex;  //!< 视频码率索引
+  std::vector<int64_t>
+      playbackRepIndex;  //!< 视频码率索引(重新命名变量，方便理解代码)
   std::vector<int64_t> playbackStart;  //!< 该片段播放开始的模拟时间（微秒）
 };
 
