@@ -118,8 +118,8 @@ class MultiTcpAvStreamClientHelper {
    * \param audioIp 音频服务器的IP地址
    * \param audioPort 音频服务器的端口号
    */
-  MultiTcpAvStreamClientHelper(Address videoIp, uint16_t videoPort, Address audioIp,
-                               uint16_t audioPort);
+  MultiTcpAvStreamClientHelper(Address videoIp, uint16_t videoPort,
+                               Address audioIp, uint16_t audioPort);
 
   /**
    * 创建MultiTcpAvStreamClientHelper，使用IPv4地址
@@ -129,8 +129,8 @@ class MultiTcpAvStreamClientHelper {
    * \param audioIp 音频服务器的IPv4地址
    * \param audioPort 音频服务器的端口号
    */
-  MultiTcpAvStreamClientHelper(Ipv4Address videoIp, uint16_t videoPort, Ipv4Address audioIp,
-                               uint16_t audioPort);
+  MultiTcpAvStreamClientHelper(Ipv4Address videoIp, uint16_t videoPort,
+                               Ipv4Address audioIp, uint16_t audioPort);
 
   /**
    * 创建MultiTcpAvStreamClientHelper，使用IPv6地址
@@ -140,8 +140,8 @@ class MultiTcpAvStreamClientHelper {
    * \param audioIp 音频服务器的IPv6地址
    * \param audioPort 音频服务器的端口号
    */
-  MultiTcpAvStreamClientHelper(Ipv6Address videoIp, uint16_t videoPort, Ipv6Address audioIp,
-                               uint16_t audioPort);
+  MultiTcpAvStreamClientHelper(Ipv6Address videoIp, uint16_t videoPort,
+                               Ipv6Address audioIp, uint16_t audioPort);
 
   /**
    * 设置在每个应用创建后要配置的属性
@@ -159,7 +159,8 @@ class MultiTcpAvStreamClientHelper {
    *
    * \returns 返回创建的应用，每个输入节点一个应用
    */
-  ApplicationContainer Install(std::vector<std::pair<Ptr<Node>, std::string> > clients) const;
+  ApplicationContainer
+  Install(std::vector<std::pair<Ptr<Node>, std::string> > clients) const;
 
   /**
    * 在单个节点上安装客户端应用
@@ -168,7 +169,8 @@ class MultiTcpAvStreamClientHelper {
    * \param clientId 客户端ID
    * \returns 返回安装的应用指针
    */
-  Ptr<Application> InstallSingleClient(Ptr<Node> node, std::string algo, uint16_t clientId) const;
+  Ptr<Application> InstallSingleClient(Ptr<Node> node, std::string algo,
+                                       uint16_t clientId) const;
 
   /**
    * 批量安装客户端应用到节点容器
@@ -176,7 +178,8 @@ class MultiTcpAvStreamClientHelper {
    * \param algo 自适应算法名称（所有客户端使用相同算法）
    * \returns 返回应用容器
    */
-  ApplicationContainer InstallBatch(NodeContainer nodes, std::string algo) const;
+  ApplicationContainer
+  InstallBatch(NodeContainer nodes, std::string algo) const;
 
  private:
   /**
@@ -187,7 +190,8 @@ class MultiTcpAvStreamClientHelper {
    * \param clientId 用于日志区分不同客户端对象
    * \returns 返回安装的应用Ptr
    */
-  Ptr<Application> InstallPriv(Ptr<Node> node, std::string algo, uint16_t clientId) const;
+  Ptr<Application>
+  InstallPriv(Ptr<Node> node, std::string algo, uint16_t clientId) const;
 
   ObjectFactory m_factory;  //!< 对象工厂
   Address m_videoAddress;   //!< 视频服务器地址

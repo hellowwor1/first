@@ -195,9 +195,7 @@ class MultiTcpAvStreamClient : public Application {
   // 主控制器状态机
   void Controller(controllerEvent event, StreamType type);
 
-  void MultiTcpAvStreamClient::DownloadController(controllerEvent event,
-                                                  StreamType type);
-  void MultiTcpAvStreamClient::PlaybackController(controllerEvent event);
+  void PlaybackController(controllerEvent event);
 
   /**
    * 设置包数据内容，将 T & message 字符串的以零结尾内容填充到 m_data 中
@@ -214,7 +212,7 @@ class MultiTcpAvStreamClient : public Application {
    * 发送前会调用 PreparePacket(T & message) 填充数据，包含请求的字节数。
    */
   template <typename T>
-  void Send(T& message, Ptr<Socket> socket);
+  void Send(T& message, StreamData* streamData);
 
   /**
    * \brief 处理数据包接收
@@ -288,14 +286,14 @@ class MultiTcpAvStreamClient : public Application {
    * \return false 表示成功播放了一个 segment，true 表示没有播放（buffer
    *          underrun / 等待）
    */
-  bool MultiTcpAvStreamClient::PlaybackHandleSingle(StreamData& stream);
+  bool PlaybackHandleSingle(StreamData& stream);
 
   /**
    * \brief 判断流的缓冲区是否耗尽
    * \param stream 流数据类型
    * \return false 表示没有耗尽，true 表示耗尽了
    */
-  bool MultiTcpAvStreamClient::IsBufferEmpty(StreamType type);
+  bool IsBufferEmpty(StreamType type);
 
   /**
    * \brief 记录指定流的下载信息

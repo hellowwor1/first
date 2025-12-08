@@ -67,7 +67,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
     // 发送段请求
     Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
              .at(streamdata.m_segmentCounter),
-         streamdata.m_socket);
+         &streamdata);
 
     streamdata.state = downloading;  // 切换到下载状态
 
@@ -86,7 +86,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
       // 发送流的下一段请求
       Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
                .at(streamdata.m_segmentCounter),
-           streamdata.m_socket);
+           &streamdata);
     } else {
       // 所有段都已下载，切换到播放状态
       streamdata.state = playing;
@@ -94,7 +94,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
     // 调度下一次播放完成事件
     controllerEvent ev = playbackFinished;
     Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
-                        &MultiTcpAvStreamClient::Controller, this, ev);
+                        &MultiTcpAvStreamClient::Controller, this, ev, type);
     return;
   }
   // 如果当前状态是 downloadingPlaying（下载+播放）
@@ -113,7 +113,8 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
         controllerEvent ev = irdFinished;  // 设置事件为延迟下载完成
         // 调度延迟事件触发
         Simulator::Schedule(MicroSeconds(streamdata.m_bDelay),
-                            &MultiTcpAvStreamClient::Controller, this, ev);
+                            &MultiTcpAvStreamClient::Controller, this, ev,
+                            type);
       } else if (streamdata.m_segmentCounter ==
                  streamdata.m_lastSegmentIndex) {  // 如果当前下载最后一段
         /*  e_df */                                // 下载完成标记
@@ -124,7 +125,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
         Send(streamdata.m_segmentData.segmentSize
                  .at(streamdata.m_currentRepIndex)
                  .at(streamdata.m_segmentCounter),
-             streamdata.m_socket);
+             &streamdata);
       }
     } else if (event == playbackFinished) {     // 如果触发事件是播放完成
       if (!PlaybackHandleSingle(streamdata)) {  // 尝试播放下一段，如果返回
@@ -135,7 +136,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
         // 调度下一次播放完成事件
         Simulator::Schedule(
             MicroSeconds(streamdata.m_segmentData.segmentDuration),
-            &MultiTcpAvStreamClient::Controller, this, ev);
+            &MultiTcpAvStreamClient::Controller, this, ev, type);
       } else {                           // 缓冲为空，无法播放
         /*  e_pu */                      // 播放空缓冲标记
         streamdata.state = downloading;  // 切换回只下载状态
@@ -151,7 +152,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
       // 发送当前段下载请求
       Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
                .at(streamdata.m_segmentCounter),
-           streamdata.m_socket);
+           &streamdata);
     } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex <
                                                 streamdata.m_lastSegmentIndex) {
       // 如果播放完成，且还有 segment
@@ -161,7 +162,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
       // 调度下一次播放完成事件
       Simulator::Schedule(
           MicroSeconds(streamdata.m_segmentData.segmentDuration),
-          &MultiTcpAvStreamClient::Controller, this, ev);
+          &MultiTcpAvStreamClient::Controller, this, ev, type);
     } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex ==
                                                 streamdata.m_lastSegmentIndex) {
       // 如果播放完成，且已经是最后的segment
@@ -439,15 +440,14 @@ void MultiTcpAvStreamClient::RequestRepIndex(StreamData* streamData) {
 
 // 指定流发送数据包到服务器
 template <typename T>
-void MultiTcpAvStreamClient::Send(T& message, Ptr<Socket> socket) {
-  NS_LOG_FUNCTION(this << message << streamType);
-  if (socket == 0) return;  // 安全检查
-  PreparePacket(message);   // 准备数据包
+void MultiTcpAvStreamClient::Send(T& message, StreamData* streamData) {
+  if (streamData->m_socket == 0) return;  // 安全检查
+  PreparePacket(message);                 // 准备数据包
   // 创建数据包并发送
   Ptr<Packet> p = Create<Packet>(m_data, m_dataSize);
   streamData->m_downloadRequestSent =
       Simulator::Now().GetMicroSeconds();  // 记录发送时间
-  socket->Send(p);                         // 发送数据包
+  streamData->m_socket->Send(p);           // 发送数据包
 }
 
 // 处理从服务器接收到的数据

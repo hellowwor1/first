@@ -8,10 +8,10 @@
 
 #include "ns3/applications-module.h"  // 引入应用层模块
 #include "ns3/config.h"
-#include "ns3/core-module.h"             // 核心模块，包含调度、时间等
-#include "ns3/flow-monitor-module.h"     // 流量监控模块（这里只是包含，并未使用）
-#include "ns3/internet-module.h"         // TCP/IP 协议栈
-#include "ns3/network-module.h"          // 节点、设备、网络基础
+#include "ns3/core-module.h"          // 核心模块，包含调度、时间等
+#include "ns3/flow-monitor-module.h"  // 流量监控模块（这里只是包含，并未使用）
+#include "ns3/internet-module.h"      // TCP/IP 协议栈
+#include "ns3/network-module.h"       // 节点、设备、网络基础
 #include "ns3/point-to-point-module.h"   // 点对点链路
 #include "ns3/tcp-stream-client.h"       // TcpStreamClient 类
 #include "ns3/tcp-stream-helper.h"       // TCP Stream server/client helper
@@ -21,13 +21,15 @@
 using namespace ns3;
 
 // 计算单程时延（将总 RTT 简化为 RTT/6）
-std::string onelinedelay(uint32_t total_rtt) { return std::to_string(int(total_rtt / 6)); }
+std::string onelinedelay(uint32_t total_rtt) {
+  return std::to_string(int(total_rtt / 6));
+}
 
 // 计算 buffer 大小（BDP × times）
 std::string bufferpkt(uint32_t total_rtt, uint32_t bd, float times) {
   // BDP = RTT × 带宽
   uint32_t bdp = (total_rtt / 1e3) * (bd * 1e6);  // 单位：bit
-  uint32_t n_pkt = bdp / 1446 * times;            // 换算成以 1446 字节为单位的包数
+  uint32_t n_pkt = bdp / 1446 * times;  // 换算成以 1446 字节为单位的包数
   return std::to_string(n_pkt);
 }
 
@@ -82,7 +84,8 @@ int main(int argc, char *argv[]) {
   queueDisc = std::string("ns3::") + queueDisc;
 
   // 设置默认的 TCP 类型为 TcpCubic ，后面再将部分服务器、客户端指定修改成BBR
-  Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::" + tcpTypeId));
+  Config::SetDefault("ns3::TcpL4Protocol::SocketType",
+                     StringValue("ns3::" + tcpTypeId));
 
   // 设置发送缓冲区大小（单位字节）
   Config::SetDefault("ns3::TcpSocket::SndBufSize",
@@ -102,9 +105,9 @@ int main(int argc, char *argv[]) {
   // 设置每个 TCP 段的大小（MSS，单位字节）
   Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue(1448));
 
-  // 设置队列最大长度，这里是 1 个包（"1p"）
-  // 注意：后面代码会覆盖这个值，用 BDP × 15 计算
-  Config::SetDefault("ns3::DropTailQueue<Packet>::MaxSize", QueueSizeValue(QueueSize("1p")));
+  // 设置网卡队列最大长度，这里是 1 个包（"1p"）
+  Config::SetDefault("ns3::DropTailQueue<Packet>::MaxSize",
+                     QueueSizeValue(QueueSize("1p")));
 
   // -------------------------------------------------------------------------
   //                          创建 6 个节点
@@ -131,7 +134,8 @@ int main(int argc, char *argv[]) {
   pointToPoint.SetDeviceAttribute("DataRate", StringValue(bandwidth));
   pointToPoint.SetChannelAttribute("Delay", StringValue(delay));
 
-  Config::SetDefault(queueDisc + "::MaxSize", QueueSizeValue(QueueSize(n_pkt + "p")));
+  Config::SetDefault(queueDisc + "::MaxSize",
+                     QueueSizeValue(QueueSize(n_pkt + "p")));
 
   // 五条链路：server0-r0，server1-r0，client0-r1，client1-r1，r0-r1（瓶颈）
   NetDeviceContainer devices1, devices2, devices3, devices4, devices5;
@@ -228,7 +232,8 @@ int main(int argc, char *argv[]) {
   clientHelper1.SetAttribute("SegmentDuration", UintegerValue(segmentDuration));
 
   // 设置视频片段大小文件路径（DASH 客户端读取每个片段大小）
-  clientHelper1.SetAttribute("SegmentSizeFilePath", StringValue(segmentSizeFilePath));
+  clientHelper1.SetAttribute("SegmentSizeFilePath",
+                             StringValue(segmentSizeFilePath));
 
   // 设置客户端总数量
   clientHelper1.SetAttribute("NumberOfClients", UintegerValue(numberOfClients));
@@ -269,7 +274,8 @@ int main(int argc, char *argv[]) {
   clientHelper2.SetAttribute("SegmentDuration", UintegerValue(segmentDuration));
 
   // 配置片段大小文件路径
-  clientHelper2.SetAttribute("SegmentSizeFilePath", StringValue(segmentSizeFilePath));
+  clientHelper2.SetAttribute("SegmentSizeFilePath",
+                             StringValue(segmentSizeFilePath));
 
   // 设置客户端数量
   clientHelper2.SetAttribute("NumberOfClients", UintegerValue(numberOfClients));
@@ -312,7 +318,8 @@ int main(int argc, char *argv[]) {
   // 在算法目录下为不同客户端数量创建子目录
   // numberOfClients 是客户端数量
   // 拼接成路径：dashLogDirectory + adaptationAlgo + "/" + numberOfClients + "/"
-  std::string dirstr(dashLogDirectory + adaptationAlgo + "/" + std::to_string(numberOfClients) + "/");
+  std::string dirstr(dashLogDirectory + adaptationAlgo + "/" +
+                     std::to_string(numberOfClients) + "/");
 
   // 创建最终目录，用于存放该算法在指定客户端数量下的日志
   mkdir(dirstr.c_str(), 0777);  // 如 ./logs/festive/2/
