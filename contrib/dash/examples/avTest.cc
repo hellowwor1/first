@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
   // 客户端总数为1个
   uint32_t numberOfClients = 1;
 
-  uint16_t ClientId1 = 1;
+  // uint16_t ClientId1 = 1;
   // uint16_t ClientId2 = 2;
 
   std::string adaptationAlgo = "festive";

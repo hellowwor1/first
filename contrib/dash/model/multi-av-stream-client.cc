@@ -421,7 +421,7 @@ void MultiTcpAvStreamClient::RequestRepIndex(StreamData* streamData) {
         "Algorithm returned representation index higher than maximum");
 
     // 保存播放序列中的码率索引，用于后续的日志记录
-    streamData->m_playbackData.playbackRepIndex.push_back(answer.nextRepIndex);
+    streamData->m_playbackData.playbackIndex.push_back(answer.nextRepIndex);
 
     // 更新播放延迟
     // m_bDelay = std::max(m_bDelay, answer.nextDownloadDelay);
@@ -433,7 +433,7 @@ void MultiTcpAvStreamClient::RequestRepIndex(StreamData* streamData) {
     // 0 对应音频的第一个码率
     streamData->m_currentRepIndex = 0;
 
-    streamData->m_playbackData.playbackRepIndex.push_back(0);
+    streamData->m_playbackData.playbackIndex.push_back(0);
     streamData->m_bDelay = 0;
   }
 }
@@ -1114,7 +1114,7 @@ void MultiTcpAvStreamClient::LogPlayback(StreamType streamType) {
                           << Simulator::Now().GetMicroSeconds() /
                                  (double)1000000
                           << " " << std::setfill(' ') << std::setw(13)
-                          << streamData->m_playbackData.playbackRepIndex.at(
+                          << streamData->m_playbackData.playbackIndex.at(
                                  streamData->m_currentPlaybackIndex)
                           << "\n";
   streamData->playbackLog.flush();
@@ -1127,10 +1127,10 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
   NS_LOG_FUNCTION(this << simulationId << clientId << numberOfClients);
 
   // 初始化视频流日志文件
-  std::string videoPrefix = dashLogDirectory + m_algoName + "/" +
+  std::string videoPrefix = dashLogDirectory + "festive" + "/" +
                             numberOfClients + "/sim" + simulationId + "_cl" +
                             clientId + "_video_";
-  std::string Prefix = dashLogDirectory + m_algoName + "/" + numberOfClients +
+  std::string Prefix = dashLogDirectory + "festive" + "/" + numberOfClients +
                        "/sim" + simulationId + "_cl" + clientId;
   // 视频下载日志
   std::string vdLog = videoPrefix + "downloadLog.txt";
@@ -1173,7 +1173,7 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
   m_videoStream.bufferUnderrunLog.flush();
 
   // 初始化音频流日志文件
-  std::string audioPrefix = dashLogDirectory + m_algoName + "/" +
+  std::string audioPrefix = dashLogDirectory + "festive" + "/" +
                             numberOfClients + "/sim" + simulationId + "_cl" +
                             clientId + "_audio_";
 
