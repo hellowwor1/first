@@ -55,9 +55,11 @@ NS_OBJECT_ENSURE_REGISTERED(MultiTcpAvStreamClient);
 
 void MultiTcpAvStreamClient::Controller(controllerEvent event,
                                         StreamType type) {
-  NS_LOG_FUNCTION(this << event);  // 记录函数调用和事件
   StreamData& streamdata =
       (type == VIDEO_STREAM ? m_videoStream : m_audioStream);
+  NS_LOG_FUNCTION(this << ToStringControllerState(streamdata.state)
+                       << ToStringControllerEvent(event)
+                       << ToStringStreamType(type));  // 记录函数调用和事件
   // 初始状态处理
   if (streamdata.state == initial) {
     // 为流请求码率索引
@@ -108,9 +110,14 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
 
       if (streamdata.m_bDelay > 0 &&
           streamdata.m_segmentCounter <= streamdata.m_lastSegmentIndex) {
-        /*  e_dirs */                      // 延迟下载事件标记
-        streamdata.state = playing;        // 切换到播放状态
-        controllerEvent ev = irdFinished;  // 设置事件为延迟下载完成
+        /*  e_dirs */  // 延迟下载事件标记
+        NS_LOG_FUNCTION(this
+                        << "延迟下载事件发生" << streamdata.m_bDelay
+                        << ToStringControllerState(streamdata.state)
+                        << ToStringControllerEvent(event)
+                        << ToStringStreamType(type));  // 记录函数调用和事件
+        streamdata.state = playing;                    // 切换到播放状态
+        controllerEvent ev = irdFinished;              // 设置事件为延迟下载完成
         // 调度延迟事件触发
         Simulator::Schedule(MicroSeconds(streamdata.m_bDelay),
                             &MultiTcpAvStreamClient::Controller, this, ev,
@@ -134,9 +141,9 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
         /*  e_pb */                             // 播放缓冲标记
         controllerEvent ev = playbackFinished;  // 设置播放完成事件
         // 调度下一次播放完成事件
-        Simulator::Schedule(
-            MicroSeconds(streamdata.m_segmentData.segmentDuration),
-            &MultiTcpAvStreamClient::Controller, this, ev, type);
+        Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
+                            &MultiTcpAvStreamClient::Controller, this, ev,
+                            type);
       } else {                           // 缓冲为空，无法播放
         /*  e_pu */                      // 播放空缓冲标记
         streamdata.state = downloading;  // 切换回只下载状态
@@ -160,9 +167,8 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
       PlaybackHandleSingle(streamdata);       // 播放缓冲区中的 segment
       controllerEvent ev = playbackFinished;  // 生成播放完成事件
       // 调度下一次播放完成事件
-      Simulator::Schedule(
-          MicroSeconds(streamdata.m_segmentData.segmentDuration),
-          &MultiTcpAvStreamClient::Controller, this, ev, type);
+      Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
+                          &MultiTcpAvStreamClient::Controller, this, ev, type);
     } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex ==
                                                 streamdata.m_lastSegmentIndex) {
       // 如果播放完成，且已经是最后的segment
@@ -174,6 +180,51 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
     return;  // 结束本次 Controller 调用
   }
 }
+std::string MultiTcpAvStreamClient::ToStringStreamType(StreamType type) {
+  switch (type) {
+    case VIDEO_STREAM:
+      return "video_stream";
+    case AUDIO_STREAM:
+      return "audio_stream";
+    default:
+      return "";
+  }
+}
+
+std::string
+MultiTcpAvStreamClient::ToStringControllerEvent(controllerEvent events) {
+  switch (events) {
+    case downloadFinished:
+      return "downloadFinished";
+    case playbackFinished:
+      return "playbackFinished";
+    case irdFinished:
+      return "irdFinished";
+    case init:
+      return "init";
+    default:
+      return "";
+  }
+}
+
+std::string
+MultiTcpAvStreamClient::ToStringControllerState(controllerState state) {
+  switch (state) {
+    case initial:
+      return "initial";
+    case downloading:
+      return "downloading";
+    case downloadingPlaying:
+      return "downloadingPlaying";
+    case playing:
+      return "playing";
+    case terminal:
+      return "terminal";
+    default:
+      return "";
+  }
+}
+
 void MultiTcpAvStreamClient::PlaybackController(controllerEvent event) {}
 
 // 获取类型标识函数
@@ -407,6 +458,7 @@ MultiTcpAvStreamClient::~MultiTcpAvStreamClient() {
 
 // 为指定流请求码率索引 (目前只有视频支持ABR)
 void MultiTcpAvStreamClient::RequestRepIndex(StreamData* streamData) {
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamData->m_type));
   algorithmReply answer;  // 存储算法回复
   // 暂时只为视频动态调整码率
   if (streamData->m_type == VIDEO_STREAM) {
@@ -445,6 +497,9 @@ void MultiTcpAvStreamClient::Send(T& message, StreamData* streamData) {
   PreparePacket(message);                 // 准备数据包
   // 创建数据包并发送
   Ptr<Packet> p = Create<Packet>(m_data, m_dataSize);
+
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamData->m_type));
+
   streamData->m_downloadRequestSent =
       Simulator::Now().GetMicroSeconds();  // 记录发送时间
   streamData->m_socket->Send(p);           // 发送数据包
@@ -452,8 +507,6 @@ void MultiTcpAvStreamClient::Send(T& message, StreamData* streamData) {
 
 // 处理从服务器接收到的数据
 void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
-  NS_LOG_FUNCTION(this << socket);
-
   // 获取套接字对应的流类型
   StreamType streamType = GetStreamTypeFromSocket(socket);
   StreamData* streamData = GetStreamData(streamType);
@@ -470,8 +523,11 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
     streamData->m_transmissionStartReceivingSegment =
         Simulator::Now().GetMicroSeconds();
 
-    NS_LOG_DEBUG(" segment start received : "
-                 << streamData->m_transmissionStartReceivingSegment);
+    std::string s1 = " " + std::to_string(streamData->m_segmentCounter) + " ";
+    NS_LOG_DEBUG(ToStringStreamType(streamType)
+                 << s1 << " segment start received(s) : "
+                 << streamData->m_transmissionStartReceivingSegment /
+                        (double)1000000);
   }
 
   uint32_t packetSize;  // 保存每个接收到的数据包大小
@@ -480,7 +536,7 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
   while ((packet = socket->Recv())) {
     packetSize = packet->GetSize();  // 获取当前数据包大小（字节数）
     // 记录吞吐量日志
-    LogThroughput(packetSize, streamType);
+    // LogThroughput(packetSize, streamType);
     // 累加已接收字节数
     streamData->m_bytesReceived += packetSize;
     // 获取当前请求的段大小
@@ -489,9 +545,11 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
             .at(streamData->m_segmentCounter);
     // 检查是否已接收完整段
     if (streamData->m_bytesReceived == expectedSize) {
-      NS_LOG_DEBUG(streamData->m_type << " segment received completely: "
-                                      << streamData->m_bytesReceived << "/"
-                                      << expectedSize << " bytes");
+      std::string s1 = " " + std::to_string(streamData->m_segmentCounter) + " ";
+      NS_LOG_DEBUG(ToStringStreamType(streamData->m_type)
+                   << s1 << " segment received completely: "
+                   << streamData->m_bytesReceived << "/" << expectedSize
+                   << " bytes");
       // 更新段接收状态
       // if (streamType == VIDEO_STREAM) {
       //   m_videoSegmentReceived = true;
@@ -509,7 +567,7 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
 // 获取套接字对应的流类型
 MultiTcpAvStreamClient::StreamType
 MultiTcpAvStreamClient::GetStreamTypeFromSocket(Ptr<Socket> socket) {
-  NS_LOG_FUNCTION(this << socket);
+  // NS_LOG_FUNCTION(this << socket);
 
   // 比较套接字指针确定流类型
   if (socket == m_videoStream.m_socket) {
@@ -525,7 +583,7 @@ MultiTcpAvStreamClient::GetStreamTypeFromSocket(Ptr<Socket> socket) {
 // 获取流数据指针
 MultiTcpAvStreamClient::StreamData*
 MultiTcpAvStreamClient::GetStreamData(StreamType streamType) {
-  NS_LOG_FUNCTION(this << streamType);
+  // NS_LOG_FUNCTION(this << streamType);
 
   // 根据流类型返回对应的数据指针
   if (streamType == VIDEO_STREAM) {
@@ -539,7 +597,7 @@ MultiTcpAvStreamClient::GetStreamData(StreamType streamType) {
 
 // 处理段接收完成
 void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
-  NS_LOG_FUNCTION(this << streamType);
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamType));
 
   StreamData* streamData = GetStreamData(streamType);
   if (streamData == NULL) return;
@@ -610,7 +668,7 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
 // 读取段大小文件
 int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile,
                                                 bool isVideo) {
-  NS_LOG_FUNCTION(this << segmentSizeFile << isVideo);
+  NS_LOG_FUNCTION(this << segmentSizeFile << (isVideo ? "视频" : "音频"));
 
   std::ifstream myfile;                  // 文件输入流
   myfile.open(segmentSizeFile.c_str());  // 打开文件
@@ -671,16 +729,18 @@ int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile,
 }
 
 bool MultiTcpAvStreamClient::PlaybackHandleSingle(StreamData& stream) {
-  NS_LOG_FUNCTION(this);  // 日志宏
-
   // 当前模拟时间（微秒）
   int64_t timeNow = Simulator::Now().GetMicroSeconds();
-
+  std::string s1 =
+      "播放第 " + std::to_string(stream.m_currentPlaybackIndex) + " 段 ";
   // 如果缓冲区为空且还有剩余段未播放，说明发生缓冲不足（buffer underrun）
   if (stream.m_segmentsInBuffer == 0 &&
       stream.m_currentPlaybackIndex < stream.m_lastSegmentIndex &&
       !stream.m_bufferUnderrun) {
     stream.m_bufferUnderrun = true;  // 标记缓冲不足
+    NS_LOG_FUNCTION(s1 << "但是缓存不足无法播放 "
+                       << ToStringStreamType(stream.m_type)
+                       << timeNow / (double)1000000);  // 日志宏
     // 写入缓冲不足日志：记录开始时间
     stream.bufferUnderrunLog << std::setfill(' ') << std::setw(26)
                              << timeNow / (double)1000000 << " ";
@@ -696,6 +756,9 @@ bool MultiTcpAvStreamClient::PlaybackHandleSingle(StreamData& stream) {
                                << "\n";  // 记录缓冲恢复时间
       stream.bufferUnderrunLog.flush();
     }
+
+    NS_LOG_FUNCTION(s1 << ToStringStreamType(stream.m_type)
+                       << timeNow / (double)1000000);  // 日志宏
     // 将当前播放段开始时间存入播放日志
     stream.m_playbackData.playbackStart.push_back(timeNow);
     LogPlayback(stream.m_type);       // 写入播放日志
@@ -809,14 +872,14 @@ bool MultiTcpAvStreamClient::IsBufferEmpty(StreamType type) {
 
 // 设置视频服务器地址和端口（IPv4）
 void MultiTcpAvStreamClient::SetVideoRemote(Ipv4Address ip, uint16_t port) {
-  NS_LOG_FUNCTION(this << ip << port);
+  NS_LOG_FUNCTION(this << Address(ip) << port);
   m_videoStream.m_peerAddress = Address(ip);  // 转换为通用地址类型
   m_videoStream.m_peerPort = port;            // 设置端口
 }
 
 // 设置音频服务器地址和端口（IPv4）
 void MultiTcpAvStreamClient::SetAudioRemote(Ipv4Address ip, uint16_t port) {
-  NS_LOG_FUNCTION(this << ip << port);
+  NS_LOG_FUNCTION(this << Address(ip) << port);
   m_audioStream.m_peerAddress = Address(ip);
   m_audioStream.m_peerPort = port;
 }
@@ -959,7 +1022,7 @@ void MultiTcpAvStreamClient::StopApplication() {
 // 准备数据包
 template <typename T>
 void MultiTcpAvStreamClient::PreparePacket(T& message) {
-  NS_LOG_FUNCTION(this << message);
+  NS_LOG_FUNCTION(this);
 
   std::ostringstream ss;
   ss << message;  // 将消息序列化为字符串
@@ -972,18 +1035,18 @@ void MultiTcpAvStreamClient::PreparePacket(T& message) {
     m_data = new uint8_t[dataSize];
     m_dataSize = dataSize;
   }
-
   // 复制数据到缓冲区
   memcpy(m_data, ss.str().c_str(), dataSize);
 
-  NS_LOG_DEBUG("Prepared packet with " << dataSize << " bytes: " << ss.str());
+  NS_LOG_DEBUG("need packet with " << dataSize - 1
+                                   << " 位数(单位字节): " << ss.str());
 }
 
 // 连接成功回调
 void MultiTcpAvStreamClient::ConnectionSucceeded(Ptr<Socket> socket) {
-  NS_LOG_FUNCTION(this << socket);
-
   StreamType streamType = GetStreamTypeFromSocket(socket);
+
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamType));
 
   if (streamType == VIDEO_STREAM) {
     m_videoConnected = true;
@@ -998,7 +1061,7 @@ void MultiTcpAvStreamClient::ConnectionSucceeded(Ptr<Socket> socket) {
 }
 
 void MultiTcpAvStreamClient::StartStreamController(StreamType type) {
-  NS_LOG_FUNCTION(this << type);
+  NS_LOG_FUNCTION(this << ToStringStreamType(type));
 
   controllerEvent event = init;  // 初始化该流的下载
 
@@ -1008,7 +1071,7 @@ void MultiTcpAvStreamClient::StartStreamController(StreamType type) {
 
 // 连接失败回调
 void MultiTcpAvStreamClient::ConnectionFailed(Ptr<Socket> socket) {
-  NS_LOG_FUNCTION(this << socket);
+  // NS_LOG_FUNCTION(this << socket);
 
   if (socket == m_videoStream.m_socket) {
     NS_LOG_ERROR("Video stream connection failed");
@@ -1020,7 +1083,7 @@ void MultiTcpAvStreamClient::ConnectionFailed(Ptr<Socket> socket) {
 // 记录吞吐量日志
 void MultiTcpAvStreamClient::LogThroughput(uint32_t packetSize,
                                            StreamType streamType) {
-  NS_LOG_FUNCTION(this << packetSize << streamType);
+  NS_LOG_FUNCTION(this << packetSize << ToStringStreamType(streamType));
 
   StreamData* streamData = GetStreamData(streamType);
   if (streamData == NULL) return;
@@ -1035,7 +1098,7 @@ void MultiTcpAvStreamClient::LogThroughput(uint32_t packetSize,
 
 // 记录下载日志
 void MultiTcpAvStreamClient::LogDownload(StreamType streamType) {
-  NS_LOG_FUNCTION(this << streamType);
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamType));
 
   StreamData* streamData = GetStreamData(streamType);
   if (streamData == NULL) return;
@@ -1064,7 +1127,7 @@ void MultiTcpAvStreamClient::LogDownload(StreamType streamType) {
 
 // 记录缓冲区日志
 void MultiTcpAvStreamClient::LogBuffer(StreamType streamType) {
-  NS_LOG_FUNCTION(this << streamType);
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamType));
 
   StreamData* streamData = GetStreamData(streamType);
   if (streamData == NULL) return;
@@ -1087,7 +1150,7 @@ void MultiTcpAvStreamClient::LogBuffer(StreamType streamType) {
 // 记录自适应算法日志
 void MultiTcpAvStreamClient::LogAdaptation(algorithmReply answer,
                                            StreamData* streamData) {
-  NS_LOG_FUNCTION(this << streamData);
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamData->m_type));
 
   // 写入自适应算法日志
   streamData->adaptationLog
@@ -1102,7 +1165,7 @@ void MultiTcpAvStreamClient::LogAdaptation(algorithmReply answer,
 
 // 记录播放日志
 void MultiTcpAvStreamClient::LogPlayback(StreamType streamType) {
-  NS_LOG_FUNCTION(this << streamType);
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamType));
 
   StreamData* streamData = GetStreamData(streamType);
   if (streamData == NULL) return;

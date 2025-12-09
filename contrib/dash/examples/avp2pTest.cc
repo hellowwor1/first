@@ -262,7 +262,7 @@ int main(int argc, char *argv[]) {
 
   // 设置仿真 ID，用于日志区分不同仿真
   clientHelperVideo.SetAttribute("SimulationId", UintegerValue(simulationId));
-
+  clientHelperVideo.SetAttribute("StreamSelection", EnumValue(2));
   // 安装客户端应用到节点上
   // Install() 会根据 client
   // 容器中的节点和算法创建对应应用，并返回ApplicationContainer

@@ -194,7 +194,9 @@ class MultiTcpAvStreamClient : public Application {
 
   // 主控制器状态机
   void Controller(controllerEvent event, StreamType type);
-
+  std::string ToStringControllerEvent(controllerEvent event);
+  std::string ToStringStreamType(StreamType type);
+  std::string ToStringControllerState(controllerState state);
   void PlaybackController(controllerEvent event);
 
   /**
@@ -351,7 +353,6 @@ class MultiTcpAvStreamClient : public Application {
   // 客户端发送的数据包
   uint32_t m_dataSize;  //!< 数据包负载大小
   uint8_t* m_data;      //!< 数据包负载数据
-
   // 视频流数据
   StreamData m_videoStream;  //!< 视频流数据
 
