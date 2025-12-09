@@ -4,7 +4,7 @@ def build(bld):
     # 强制告诉 waf：dash/examples 依赖 lte 和 epc
     # bld.env.NS3_MODULES = bld.env.NS3_MODULES + ['lte', 'epc']
 
-    obj = bld.create_ns3_program('avp2pTest',
+    obj = bld.create_ns3_program('avp2pTest_sim104',
                                  ['dash', 'internet', 'applications',
                                   'point-to-point'])
-    obj.source = 'avp2pTest.cc'
+    obj.source = 'avp2pTest_sim104.cc'
