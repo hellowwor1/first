@@ -178,11 +178,11 @@ class MultiTcpAvStreamClient : public Application {
     int64_t m_downloadRequestSent;  //!< 下载请求发送时间
 
     // 吞吐量和缓冲区数据
-    throughputData m_throughput;  //!< 吞吐量跟踪数据
-    bufferData m_bufferData;      //!< 缓冲区跟踪数据
-    playbackData m_playbackData;  //!< 播放跟踪数据
+    throughputData m_throughput = {};  //!< 吞吐量跟踪数据
+    bufferData m_bufferData = {};      //!< 缓冲区跟踪数据
+    playbackData m_playbackData = {};  //!< 播放跟踪数据
 
-    videoData m_segmentData;  //!< 段信息
+    videoData m_segmentData = {};  //!< 段信息
 
     controllerState state;  //!< 当前状态机状态
 

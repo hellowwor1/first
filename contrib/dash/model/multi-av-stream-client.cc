@@ -162,7 +162,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
            &streamdata);
     } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex <
                                                 streamdata.m_lastSegmentIndex) {
-      // 如果播放完成，且还有 segment
+      // 如果播放完成，且还有 segment 没有播放完
       /*  e_pb */                             // 播放完成标记
       PlaybackHandleSingle(streamdata);       // 播放缓冲区中的 segment
       controllerEvent ev = playbackFinished;  // 生成播放完成事件
@@ -462,7 +462,7 @@ void MultiTcpAvStreamClient::RequestRepIndex(StreamData* streamData) {
   algorithmReply answer;  // 存储算法回复
   // 暂时只为视频动态调整码率
   if (streamData->m_type == VIDEO_STREAM) {
-    // 调用自适应算法
+    // 调用自适应算法`
     answer =
         streamData->algo->GetNextRep(streamData->m_segmentCounter, m_clientId);
     streamData->m_currentRepIndex = answer.nextRepIndex;  // 更新当前码率索引
@@ -536,7 +536,7 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
   while ((packet = socket->Recv())) {
     packetSize = packet->GetSize();  // 获取当前数据包大小（字节数）
     // 记录吞吐量日志
-    // LogThroughput(packetSize, streamType);
+    LogThroughput(packetSize, streamType);
     // 累加已接收字节数
     streamData->m_bytesReceived += packetSize;
     // 获取当前请求的段大小
@@ -1083,7 +1083,7 @@ void MultiTcpAvStreamClient::ConnectionFailed(Ptr<Socket> socket) {
 // 记录吞吐量日志
 void MultiTcpAvStreamClient::LogThroughput(uint32_t packetSize,
                                            StreamType streamType) {
-  NS_LOG_FUNCTION(this << packetSize << ToStringStreamType(streamType));
+  // NS_LOG_FUNCTION(this << packetSize << ToStringStreamType(streamType));
 
   StreamData* streamData = GetStreamData(streamType);
   if (streamData == NULL) return;
@@ -1230,7 +1230,7 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
 
   // 视频缓冲区不足日志
   std::string vbuLog = videoPrefix + "bufferUnderrunLog.txt";
-  m_videoStream.bufferUnderrunLog.open(vtLog.c_str());
+  m_videoStream.bufferUnderrunLog.open(vbuLog.c_str());
   m_videoStream.bufferUnderrunLog
       << "Buffer_Underrun_Started_At         Until \n";
   m_videoStream.bufferUnderrunLog.flush();
@@ -1275,7 +1275,7 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
 
   // 音频缓冲区不足日志
   std::string abuLog = audioPrefix + "bufferUnderrunLog.txt";
-  m_audioStream.bufferUnderrunLog.open(vtLog.c_str());
+  m_audioStream.bufferUnderrunLog.open(abuLog.c_str());
   m_audioStream.bufferUnderrunLog
       << "Buffer_Underrun_Started_At         Until \n";
   m_audioStream.bufferUnderrunLog.flush();

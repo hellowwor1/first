@@ -87,9 +87,11 @@ void TcpStreamClient::Controller(controllerEvent event) {
       }
 
       if (m_bDelay > 0 && m_segmentCounter <= m_lastSegmentIndex) {
-        /*  e_dirs */                      // 延迟下载事件标记
-        state = playing;                   // 切换到播放状态
-        controllerEvent ev = irdFinished;  // 设置事件为延迟下载完成
+        /*  e_dirs */  // 延迟下载事件标记
+        NS_LOG_FUNCTION(this << "延迟下载事件发生"
+                             << m_bDelay);  // 记录函数调用和事件
+        state = playing;                    // 切换到播放状态
+        controllerEvent ev = irdFinished;   // 设置事件为延迟下载完成
         // 调度延迟事件触发
         Simulator::Schedule(MicroSeconds(m_bDelay),
                             &TcpStreamClient::Controller, this, ev);

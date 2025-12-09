@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
   // 数据片的持续时间
   uint64_t segmentDuration = 3000000;
   // 模拟id
-  uint32_t simulationId = 102;
+  uint32_t simulationId = 103;
   // 客户端总数为1个
   uint32_t numberOfClients = 1;
 
@@ -317,7 +317,7 @@ int main(int argc, char *argv[]) {
   //                         仿真运行 60 秒
   // -------------------------------------------------------------------------
 
-  Simulator::Stop(Seconds(60));
+  Simulator::Stop(Seconds(300));
   Simulator::Run();
   Simulator::Destroy();
   return 0;

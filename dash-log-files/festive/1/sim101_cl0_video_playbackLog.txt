@@ -1,3 +1,0 @@
-Segment_Index Playback_Start Quality_Level
-            0        2.19385             0
-            1        5.19385             0

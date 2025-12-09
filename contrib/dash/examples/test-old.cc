@@ -342,7 +342,7 @@ int main(int argc, char *argv[]) {
   //                         仿真运行 60 秒
   // -------------------------------------------------------------------------
 
-  Simulator::Stop(Seconds(60));
+  Simulator::Stop(Seconds(120));
   Simulator::Run();
   Simulator::Destroy();
   return 0;
