@@ -368,9 +368,10 @@ MultiTcpAvStreamClient::MultiTcpAvStreamClient() {
 }
 
 // 初始化客户端
-void MultiTcpAvStreamClient::Initialise(std::string algorithm,
+void MultiTcpAvStreamClient::Initialise(std::string video_algorithm,
+                                        std::string audio_algorithm,
                                         uint16_t clientId) {
-  NS_LOG_FUNCTION(this << algorithm << clientId);
+  NS_LOG_FUNCTION(this << video_algorithm << audio_algorithm << clientId);
 
   // 设置视频流段持续时间, 音频使用相同的段持续时间
   m_videoStream.m_segmentDuration = m_segmentDuration;
@@ -391,26 +392,26 @@ void MultiTcpAvStreamClient::Initialise(std::string algorithm,
         m_videoStream.m_segmentData.averageBitrate.size() - 1;
 
     // 为视频流创建自适应算法对象
-    if (algorithm == "tobasco") {
+    if (video_algorithm == "tobasco") {
       m_videoStream.algo = new TobascoAlgorithm(
           m_videoStream.m_segmentData, m_videoStream.m_playbackData,
           m_videoStream.m_bufferData, m_videoStream.m_throughput);
-    } else if (algorithm == "panda") {
+    } else if (video_algorithm == "panda") {
       m_videoStream.algo = new PandaAlgorithm(
           m_videoStream.m_segmentData, m_videoStream.m_playbackData,
           m_videoStream.m_bufferData, m_videoStream.m_throughput);
-    } else if (algorithm == "festive") {
+    } else if (video_algorithm == "festive") {
       m_videoStream.algo = new FestiveAlgorithm(
           m_videoStream.m_segmentData, m_videoStream.m_playbackData,
           m_videoStream.m_bufferData, m_videoStream.m_throughput);
     } else {
-      NS_LOG_ERROR("Invalid algorithm name entered. Terminating.");
+      NS_LOG_ERROR("Invalid video_algorithm name entered. Terminating.");
       StopApplication();
       Simulator::Stop();
       Simulator::Destroy();
     }
 
-    m_videoStream.m_algoName = algorithm;  // 保存算法名称
+    m_videoStream.m_algoName = video_algorithm;  // 保存算法名称
   }
   if (m_streamSelection == AUDIO_ONLY || m_streamSelection == AUDIO_VIDEO) {
     // 读取音频段大小文件
@@ -426,8 +427,21 @@ void MultiTcpAvStreamClient::Initialise(std::string algorithm,
     m_audioStream.m_highestRepIndex =
         m_audioStream.m_segmentData.averageBitrate.size() - 1;
 
-    // 音频暂不使用 ABR
-    m_audioStream.algo = nullptr;
+    // // 音频暂不使用 ABR
+    // m_audioStream.algo = nullptr;
+
+    // 为音频流创建自适应算法对象
+    if (audio_algorithm == "simple") {
+      m_audioStream.algo = new AudioSimpleAlgorithm(
+          m_audioStream.m_segmentData, m_audioStream.m_playbackData,
+          m_audioStream.m_bufferData, m_audioStream.m_throughput);
+    } else {
+      NS_LOG_ERROR("Invalid audio_algorithm name entered. Terminating.");
+      StopApplication();
+      Simulator::Stop();
+      Simulator::Destroy();
+    }
+    m_audioStream.m_algoName = audio_algorithm;
   }
   // 初始化各种日志文件
   InitializeLogFiles(ToString(m_simulationId), ToString(m_clientId),
@@ -457,37 +471,27 @@ MultiTcpAvStreamClient::~MultiTcpAvStreamClient() {
 }
 
 // 为指定流请求码率索引 (目前只有视频支持ABR)
+// 2025/12/14 目前音频、视频全部支持ABR
 void MultiTcpAvStreamClient::RequestRepIndex(StreamData* streamData) {
   NS_LOG_FUNCTION(this << ToStringStreamType(streamData->m_type));
   algorithmReply answer;  // 存储算法回复
-  // 暂时只为视频动态调整码率
-  if (streamData->m_type == VIDEO_STREAM) {
-    // 调用自适应算法`
-    answer =
-        streamData->algo->GetNextRep(streamData->m_segmentCounter, m_clientId);
-    streamData->m_currentRepIndex = answer.nextRepIndex;  // 更新当前码率索引
+                          // 暂时只为视频动态调整码率
+  // 调用自适应算法`
+  answer =
+      streamData->algo->GetNextRep(streamData->m_segmentCounter, m_clientId);
+  streamData->m_currentRepIndex = answer.nextRepIndex;  // 更新当前码率索引
 
-    // 确保码率索引不超过最大值
-    NS_ASSERT_MSG(
-        answer.nextRepIndex <= streamData->m_highestRepIndex,
-        "Algorithm returned representation index higher than maximum");
+  // 确保码率索引不超过最大值
+  NS_ASSERT_MSG(answer.nextRepIndex <= streamData->m_highestRepIndex,
+                "Algorithm returned representation index higher than maximum");
 
-    // 保存播放序列中的码率索引，用于后续的日志记录
-    streamData->m_playbackData.playbackIndex.push_back(answer.nextRepIndex);
-
-    // 更新播放延迟
-    // m_bDelay = std::max(m_bDelay, answer.nextDownloadDelay);
-    streamData->m_bDelay = answer.nextDownloadDelay;
-    // 记录自适应算法决策
-    LogAdaptation(answer, streamData);
-  } else {
-    // 音频 暂时 不调整码率
-    // 0 对应音频的第一个码率
-    streamData->m_currentRepIndex = 0;
-
-    streamData->m_playbackData.playbackIndex.push_back(0);
-    streamData->m_bDelay = 0;
-  }
+  // 保存播放序列中的码率索引，用于后续的日志记录
+  streamData->m_playbackData.playbackIndex.push_back(answer.nextRepIndex);
+  // 更新播放延迟
+  // m_bDelay = std::max(m_bDelay, answer.nextDownloadDelay);
+  streamData->m_bDelay = answer.nextDownloadDelay;
+  // 记录自适应算法决策
+  LogAdaptation(answer, streamData);
 }
 
 // 指定流发送数据包到服务器
@@ -1189,14 +1193,17 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
                                                 std::string numberOfClients) {
   NS_LOG_FUNCTION(this << simulationId << clientId << numberOfClients);
 
-  // 初始化视频流日志文件
-  std::string videoPrefix = dashLogDirectory + "festive" + "/" +
-                            numberOfClients + "/sim" + simulationId + "_cl" +
-                            clientId + "_video_";
-  std::string Prefix = dashLogDirectory + "festive" + "/" + numberOfClients +
-                       "/sim" + simulationId + "_cl" + clientId;
+  // 初始化日志文件
+  std::string basePrefix =
+      dashLogDirectory + "/sim" + simulationId + "_" + "cl" + numberOfClients;
+
+  std::string videoPrefix = basePrefix + "/" + m_videoStream.m_algoName;
+
+  // 初始化音频流日志文件
+  std::string audioPrefix = basePrefix + "/" + m_audioStream.m_algoName;
+
   // 视频下载日志
-  std::string vdLog = videoPrefix + "downloadLog.txt";
+  std::string vdLog = videoPrefix + "/downloadLog.txt";
   m_videoStream.downloadLog.open(vdLog.c_str());
   m_videoStream.downloadLog
       << "Segment_Index Download_Request_Sent Download_Start "
@@ -1204,44 +1211,39 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
   m_videoStream.downloadLog.flush();
 
   // 视频播放日志
-  std::string vpLog = videoPrefix + "playbackLog.txt";
+  std::string vpLog = videoPrefix + "/playbackLog.txt";
   m_videoStream.playbackLog.open(vpLog.c_str());
   m_videoStream.playbackLog << "Segment_Index Playback_Start Quality_Level\n";
   m_videoStream.playbackLog.flush();
 
   // 视频自适应日志
-  std::string vaLog = videoPrefix + "adaptationLog.txt";
+  std::string vaLog = videoPrefix + "/adaptationLog.txt";
   m_videoStream.adaptationLog.open(vaLog.c_str());
   m_videoStream.adaptationLog
       << "Segment_Index Rep_Level Decision_Point_Of_Time Case DelayCase\n";
   m_videoStream.adaptationLog.flush();
 
   // 视频缓冲区日志
-  std::string vbLog = videoPrefix + "bufferLog.txt";
+  std::string vbLog = videoPrefix + "/bufferLog.txt";
   m_videoStream.bufferLog.open(vbLog.c_str());
   m_videoStream.bufferLog << "     Time_Now  Buffer_Level \n";
   m_videoStream.bufferLog.flush();
 
   // 视频吞吐量日志
-  std::string vtLog = videoPrefix + "throughputLog.txt";
+  std::string vtLog = videoPrefix + "/throughputLog.txt";
   m_videoStream.throughputLog.open(vtLog.c_str());
   m_videoStream.throughputLog << "     Time_Now Bytes Received \n";
   m_videoStream.throughputLog.flush();
 
   // 视频缓冲区不足日志
-  std::string vbuLog = videoPrefix + "bufferUnderrunLog.txt";
+  std::string vbuLog = videoPrefix + "/bufferUnderrunLog.txt";
   m_videoStream.bufferUnderrunLog.open(vbuLog.c_str());
   m_videoStream.bufferUnderrunLog
       << "Buffer_Underrun_Started_At         Until \n";
   m_videoStream.bufferUnderrunLog.flush();
 
-  // 初始化音频流日志文件
-  std::string audioPrefix = dashLogDirectory + "festive" + "/" +
-                            numberOfClients + "/sim" + simulationId + "_cl" +
-                            clientId + "_audio_";
-
   // 音频下载日志
-  std::string adLog = audioPrefix + "downloadLog.txt";
+  std::string adLog = audioPrefix + "/downloadLog.txt";
   m_audioStream.downloadLog.open(adLog.c_str());
   m_audioStream.downloadLog
       << "Segment_Index Download_Request_Sent Download_Start "
@@ -1249,45 +1251,36 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
   m_audioStream.downloadLog.flush();
 
   // 音频播放日志
-  std::string apLog = audioPrefix + "playbackLog.txt";
+  std::string apLog = audioPrefix + "/playbackLog.txt";
   m_audioStream.playbackLog.open(apLog.c_str());
   m_audioStream.playbackLog << "Segment_Index Playback_Start Quality_Level\n";
   m_audioStream.playbackLog.flush();
 
   // 音频自适应日志
-  std::string aaLog = audioPrefix + "adaptationLog.txt";
+  std::string aaLog = audioPrefix + "/adaptationLog.txt";
   m_audioStream.adaptationLog.open(aaLog.c_str());
   m_audioStream.adaptationLog
       << "Segment_Index Rep_Level Decision_Point_Of_Time Case DelayCase\n";
   m_audioStream.adaptationLog.flush();
 
   // 音频缓冲区日志
-  std::string abLog = audioPrefix + "bufferLog.txt";
+  std::string abLog = audioPrefix + "/bufferLog.txt";
   m_audioStream.bufferLog.open(abLog.c_str());
   m_audioStream.bufferLog << "     Time_Now  Buffer_Level \n";
   m_audioStream.bufferLog.flush();
 
   // 音频吞吐量日志
-  std::string atLog = audioPrefix + "throughputLog.txt";
+  std::string atLog = audioPrefix + "/throughputLog.txt";
   m_audioStream.throughputLog.open(atLog.c_str());
   m_audioStream.throughputLog << "     Time_Now Bytes Received \n";
   m_audioStream.throughputLog.flush();
 
   // 音频缓冲区不足日志
-  std::string abuLog = audioPrefix + "bufferUnderrunLog.txt";
+  std::string abuLog = audioPrefix + "/bufferUnderrunLog.txt";
   m_audioStream.bufferUnderrunLog.open(abuLog.c_str());
   m_audioStream.bufferUnderrunLog
       << "Buffer_Underrun_Started_At         Until \n";
   m_audioStream.bufferUnderrunLog.flush();
-
-  // 音视频同步/不同步 日志
-  // 记录日志：sim_time_s, video_pts_ms, audio_pts_ms, diff_ms,
-  // v_index, a_index, desync_flag
-  // std::string avLog = Prefix + "AVSyncLog.txt";
-  // m_avSyncLog.open(vtLog.c_str());
-  // m_avSyncLog << "Sim_Time(s)  Video_Pts(ms)  Audio_Pts(ms)  Diff(ms)  "
-  //             << "V_Index  A_Index  Desync_Flag  \n";
-  // m_avSyncLog.flush();
 
   NS_LOG_INFO("Log files initialized for client " << clientId);
 }

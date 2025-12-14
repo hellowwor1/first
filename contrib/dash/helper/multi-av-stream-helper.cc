@@ -161,19 +161,23 @@ void MultiTcpAvStreamClientHelper::SetAttribute(std::string name,
 
 // 安装客户端应用到一组节点，每个节点对应一个自适应算法
 ApplicationContainer MultiTcpAvStreamClientHelper::Install(
-    std::vector<std::pair<Ptr<Node>, std::string> > clients) const {
+    std::vector<std::pair<Ptr<Node>, std::pair<std::string, std::string>>>
+        clients) const {
   ApplicationContainer apps;  // 创建空的应用容器
   // 遍历每个节点-算法对
   for (uint32_t i = 0; i < clients.size(); i++) {
     // 调用私有函数安装客户端应用，并将应用添加到容器中
-    apps.Add(InstallPriv(clients.at(i).first, clients.at(i).second, i));
+    apps.Add(InstallPriv(clients.at(i).first, clients.at(i).second.first,
+                         clients.at(i).second.second, i));
   }
   return apps;  // 返回所有安装好的客户端应用
 }
 
 // 私有函数：在节点上安装客户端应用并初始化自适应算法
 Ptr<Application>
-MultiTcpAvStreamClientHelper::InstallPriv(Ptr<Node> node, std::string algo,
+MultiTcpAvStreamClientHelper::InstallPriv(Ptr<Node> node,
+                                          std::string video_algo,
+                                          std::string audio_algo,
                                           uint16_t clientId) const {
   // 使用工厂创建MultiTcpAvStreamClient对象
   Ptr<Application> app = m_factory.Create<MultiTcpAvStreamClient>();
@@ -183,7 +187,7 @@ MultiTcpAvStreamClientHelper::InstallPriv(Ptr<Node> node, std::string algo,
   // 设置客户端ID，用于日志区分
   client->SetAttribute("ClientId", UintegerValue(clientId));
   // 初始化自适应算法
-  client->Initialise(algo, clientId);
+  client->Initialise(video_algo, audio_algo, clientId);
   // 将客户端应用添加到节点
   node->AddApplication(app);
   return app;  // 返回应用指针

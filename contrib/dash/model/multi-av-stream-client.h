@@ -5,6 +5,7 @@
 #include <iostream>
 #include <map>
 
+#include "audio-simple-algorithm.h"
 #include "festive.h"
 #include "ns3/application.h"
 #include "ns3/event-id.h"
@@ -46,8 +47,8 @@ class MultiTcpAvStreamClient : public Application {
    * \param algorithm 使用的自适应算法名称
    * \param clientId 客户端ID
    */
-  void Initialise(std::string algorithm, uint16_t clientId);
-
+  void Initialise(std::string video_algorithm, std::string audio_algorithm,
+                  uint16_t clientId);
   /**
    * \brief 设置视频服务器的远程地址和端口
    * \param ip 视频服务器的IPv4地址
