@@ -42,6 +42,120 @@ void SetCCA(Ptr<Node> node, std::string type) {
   Ptr<TcpL4Protocol> tcp = node->GetObject<TcpL4Protocol>();
   tcp->SetAttribute("SocketType", StringValue("ns3::" + type));
 }
+std::vector<std::string> g_bwTrace;
+
+// 读取 trace 链路带宽文件 每秒变化瓶颈链路的带宽
+void LoadBandwidthTrace(const std::string &filename) {
+  std::ifstream infile(filename);
+  std::string line;
+
+  if (!infile.is_open()) {
+    NS_FATAL_ERROR("Cannot open bandwidth trace file: " << filename);
+  }
+
+  while (std::getline(infile, line)) {
+    if (!line.empty()) {
+      g_bwTrace.push_back(line);
+    }
+  }
+
+  infile.close();
+
+  NS_LOG_UNCOND("Loaded " << g_bwTrace.size() << " bandwidth samples");
+}
+
+void UpdateLinkBandwidth(Ptr<PointToPointNetDevice> dev, uint32_t index) {
+  if (index >= g_bwTrace.size()) {
+    return;  // 文件读完就停止更新
+  }
+
+  std::string bw = g_bwTrace[index];
+
+  dev->SetDataRate(DataRate(bw));
+
+  // NS_LOG_UNCOND("Time " << Simulator::Now().GetSeconds()
+  //                       << "s, set link bandwidth = " << bw);
+
+  // 1 秒后更新下一条
+  Simulator::Schedule(Seconds(1.0), &UpdateLinkBandwidth, dev, index + 1);
+}
+
+// 每秒统计
+static uint64_t g_videoBytes = 0;
+static uint64_t g_audioBytes = 0;
+
+// 记录时间
+static double g_lastTime = 0.0;
+static const uint16_t VIDEO_SRC_PORT = 10000;
+static const uint16_t AUDIO_SRC_PORT = 10001;
+static uint32_t g_bottleneckIf = 0;
+static std::ofstream g_bwShareFile;
+void BottleneckIpv4TxTrace(Ptr<const Packet> packet, Ptr<Ipv4> ipv4,
+                           uint32_t interface) {
+  // 1. 只统计瓶颈接口（r2 -> client）
+  if (interface != g_bottleneckIf) {
+    return;
+  }
+
+  // 2. 拷贝 packet（因为要解析头）
+  Ptr<Packet> pkt = packet->Copy();
+
+  Ipv4Header ipHeader;
+  TcpHeader tcpHeader;
+
+  // 3. 解析 IP 头（Ipv4::Tx 一定能解析成功，但保守起见）
+  if (!pkt->RemoveHeader(ipHeader)) {
+    return;
+  }
+
+  // 4. 只统计 TCP
+  if (ipHeader.GetProtocol() != 6) {
+    return;
+  }
+
+  // 5. 解析 TCP 头
+  if (!pkt->PeekHeader(tcpHeader)) {
+    return;
+  }
+
+  uint16_t srcPort = tcpHeader.GetSourcePort();
+  uint32_t pktSize = packet->GetSize();  // 含 IP/TCP 头，更符合“链路占用”
+
+  // 6. 按“服务器源端口”区分流
+  if (srcPort == VIDEO_SRC_PORT) {
+    g_videoBytes += pktSize;
+  } else if (srcPort == AUDIO_SRC_PORT) {
+    g_audioBytes += pktSize;
+  }
+}
+
+void ReportBandwidthShare() {
+  double now = Simulator::Now().GetSeconds();
+  double interval = now - g_lastTime;
+
+  uint64_t totalBytes = g_videoBytes + g_audioBytes;
+  NS_LOG_UNCOND("ReportBandwidthShare     now:"
+                << now << "  interval:" << interval
+                << "  totalBytes:" << totalBytes);
+  if (totalBytes > 0 && interval > 0) {
+    double videoShare = (double)g_videoBytes / totalBytes;
+    double audioShare = (double)g_audioBytes / totalBytes;
+
+    double videoMbps = g_videoBytes * 8.0 / interval / 1e6;
+    double audioMbps = g_audioBytes * 8.0 / interval / 1e6;
+
+    g_bwShareFile << now << "\t" << videoShare << "\t" << audioShare << "\t"
+                  << videoMbps << "\t" << audioMbps << std::endl;
+    g_bwShareFile.flush();
+  }
+
+  // 清零，进入下一个 1s 窗口
+  g_videoBytes = 0;
+  g_audioBytes = 0;
+  g_lastTime = now;
+
+  Simulator::Schedule(Seconds(1.0), &ReportBandwidthShare);
+}
 
 /*
     2个服务器，服务器1存储视频，服务器2存储音频
@@ -56,7 +170,9 @@ int main(int argc, char *argv[]) {
   // 模拟id
   // 103 模拟 r0_r2与r2_c这2条链路上面有拥塞情况
   // 104 模拟畅通无阻
-  uint32_t simulationId = 105;
+  // 105 模拟有大量随机启动随机结束的背景流量
+  // 106 2个流之间的竞争问题作出来(使用时变链路带宽,不用随机的背景流量)
+  uint32_t simulationId = 106;
   // 客户端总数为1个
   uint32_t numberOfClients = 1;
 
@@ -87,6 +203,19 @@ int main(int argc, char *argv[]) {
   mkdir(videoPrefix.c_str(), 0777);
   mkdir(audioPrefix.c_str(), 0777);
 
+  g_bwShareFile.open(basePrefix + "/bottleneck_bandwidth_share.txt",
+                     std::ios::out | std::ios::trunc);
+
+  if (!g_bwShareFile.is_open()) {
+    NS_FATAL_ERROR("Cannot open output file!");
+  }
+  // 写表头
+  g_bwShareFile << "Time\t"
+                << "VideoShare\t"
+                << "AudioShare\t"
+                << "VideoMbps\t"
+                << "AudioMbps" << std::endl;
+
   // -------------------- 网络参数 --------------------
 
   // 总 RTT（Round Trip Time，往返时延）
@@ -95,8 +224,7 @@ int main(int argc, char *argv[]) {
 
   // 链路带宽（Bandwidth），单位 Mbps
   // 这里表示每条链路最大传输速率
-  uint32_t m_bd_v1 = 10;  // 链路带宽 10 Mbps
-  uint32_t m_bd_v2 = 15;
+  uint32_t m_bd_v1 = 20;  // 链路带宽 20 Mbps
 
   // 缓冲区大小倍数
   // m_buffersize_time = 15，表示队列缓冲区大小是 BDP 的 15 倍
@@ -166,8 +294,7 @@ int main(int argc, char *argv[]) {
   */
   std::string delay = onelinedelay(m_rtt) + "ms";  // 单向时延
   std::string bandwidth_v1 = std::to_string(m_bd_v1) + "Mbps";
-  std::string bandwidth_v2 = std::to_string(m_bd_v2) + "Mbps";
-  std::string n_pkt = bufferpkt(m_rtt, (m_bd_v1 + m_bd_v2) / 2,
+  std::string n_pkt = bufferpkt(m_rtt, m_bd_v1,
                                 m_buffersize_time);  // Queue 大小
   // 设置路由器拥塞控制的队列长度
   Config::SetDefault(queueDisc + "::MaxSize",
@@ -179,18 +306,11 @@ int main(int argc, char *argv[]) {
 
   // 有线链路 server0-r0，server1-r1，r0-r2，r1-r2
   NetDeviceContainer video_to_r0, audio_to_r1, r1_to_r2, r0_to_r2, r2_to_c;
-  //   video_to_r0 = p2p_v1.Install(servers.Get(0), routers.Get(0));
+  video_to_r0 = p2p_v1.Install(servers.Get(0), routers.Get(0));
   audio_to_r1 = p2p_v1.Install(servers.Get(1), routers.Get(1));
   r1_to_r2 = p2p_v1.Install(routers.Get(1), routers.Get(2));
-  //   r0_to_r2 = p2p_v1.Install(routers.Get(0), routers.Get(2));
-  r2_to_c = p2p_v1.Install(routers.Get(2), clients.Get(0));
-
-  // PointToPointHelper p2p_v2;
-  // p2p_v2.SetDeviceAttribute("DataRate", StringValue(bandwidth_v2));
-  // p2p_v2.SetChannelAttribute("Delay", StringValue(delay));
-
-  video_to_r0 = p2p_v1.Install(servers.Get(0), routers.Get(0));
   r0_to_r2 = p2p_v1.Install(routers.Get(0), routers.Get(2));
+  r2_to_c = p2p_v1.Install(routers.Get(2), clients.Get(0));
 
   // -------------------------------------------------------------------------
   //                               安装 TCP/IP 协议栈
@@ -199,8 +319,6 @@ int main(int argc, char *argv[]) {
   InternetStackHelper stack;
   stack.InstallAll();
 
-  // UE 通常通过 EPC 分配 IP，但如果要在 UE上运行本地应用，需要安装 stack
-
   // -------------------------------------------------------------------------
   //                          设置瓶颈队列 (FIFO)
   // -------------------------------------------------------------------------
@@ -208,10 +326,6 @@ int main(int argc, char *argv[]) {
   TrafficControlHelper tch1;
   tch1.SetRootQueueDisc(queueDisc);
   tch1.Install(r2_to_c);
-
-  TrafficControlHelper tch2;
-  tch2.SetRootQueueDisc(queueDisc);
-  tch2.Install(r0_to_r2);
 
   // -------------------------------------------------------------------------
   //                               配置 IP 地址
@@ -237,60 +351,6 @@ int main(int argc, char *argv[]) {
 
   // 生成其他路由（边缘节点到骨干等）
   Ipv4GlobalRoutingHelper::PopulateRoutingTables();
-
-  // 插入背景流量
-  NodeContainer bgSenders;
-  bgSenders.Add(servers.Get(0));
-  bgSenders.Add(servers.Get(1));
-  NodeContainer bgReceivers;
-  bgReceivers.Add(clients.Get(0));
-
-  uint16_t bgBasePort = 9000;
-  uint32_t flowsPerSender = 6;
-
-  ApplicationContainer bgSinkApps;
-
-  Ptr<UniformRandomVariable> startRv = CreateObject<UniformRandomVariable>();
-  Ptr<UniformRandomVariable> durRv = CreateObject<UniformRandomVariable>();
-
-  startRv->SetAttribute("Min", DoubleValue(1.0));
-  startRv->SetAttribute("Max", DoubleValue(5.0));
-
-  durRv->SetAttribute("Min", DoubleValue(20.0));
-  durRv->SetAttribute("Max", DoubleValue(60.0));
-
-  for (uint32_t i = 0; i < bgSenders.GetN(); ++i) {
-    for (uint32_t j = 0; j < flowsPerSender; ++j) {
-      uint16_t port = bgBasePort + i * 100 + j;
-
-      PacketSinkHelper sinkHelper(
-          "ns3::TcpSocketFactory",
-          InetSocketAddress(Ipv4Address::GetAny(), port));
-
-      ApplicationContainer sinkApp = sinkHelper.Install(bgReceivers.Get(0));
-
-      sinkApp.Start(Seconds(0.0));
-      sinkApp.Stop(Seconds(120.0));
-
-      bgSinkApps.Add(sinkApp);
-
-      BulkSendHelper bulkHelper(
-          "ns3::TcpSocketFactory",
-          InetSocketAddress(
-              interfaces5.GetAddress(1),  // client IP (r2_to_c 的 [1])
-              port));
-
-      bulkHelper.SetAttribute("MaxBytes", UintegerValue(0));  // 无限发送
-
-      ApplicationContainer bgApp = bulkHelper.Install(bgSenders.Get(i));
-
-      double startTime = startRv->GetValue();
-      double stopTime = startTime + durRv->GetValue();
-
-      bgApp.Start(Seconds(startTime));
-      bgApp.Stop(Seconds(stopTime));
-    }
-  }
 
   // -------------------------------------------------------------------------
   //                                创建应用
@@ -372,9 +432,34 @@ int main(int argc, char *argv[]) {
   //                         仿真运行
   // -------------------------------------------------------------------------
 
-  Simulator::Stop(Seconds(100));
-  Simulator::Schedule(Seconds(0.1), &SetCCA, servers.Get(0), "TcpBbr");
+  // 统计2个流在瓶颈链路处的链路带宽资源的占比
+  Ptr<PointToPointNetDevice> bottleneckDev =
+      r2_to_c.Get(0)->GetObject<PointToPointNetDevice>();
+
+  // r2 节点
+  Ptr<Node> r2 = routers.Get(2);
+
+  // IPv4 协议栈
+  Ptr<Ipv4> ipv4 = r2->GetObject<Ipv4>();
+
+  // 瓶颈接口 index
+  g_bottleneckIf = ipv4->GetInterfaceForDevice(r2_to_c.Get(0));
+
+  // 连接 Tx trace
+  ipv4->TraceConnectWithoutContext("Tx", MakeCallback(&BottleneckIpv4TxTrace));
+
+  Simulator::Schedule(Seconds(1.0), &ReportBandwidthShare);
+
+  // 每秒读取带宽trace，模拟时变的瓶颈链路
+  LoadBandwidthTrace("trace_v5.txt");
+  Simulator::Schedule(Seconds(0.0), &UpdateLinkBandwidth, bottleneckDev, 0);
+
+  Simulator::Stop(Seconds(399));
+  // Simulator::Schedule(Seconds(0.1), &SetCCA, servers.Get(0), "TcpBbr");
   Simulator::Run();
   Simulator::Destroy();
+  if (g_bwShareFile.is_open()) {
+    g_bwShareFile.close();
+  }
   return 0;
 }

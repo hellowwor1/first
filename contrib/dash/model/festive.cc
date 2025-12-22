@@ -31,17 +31,22 @@ FestiveAlgorithm::FestiveAlgorithm(const videoData &videoData,
                                    const throughputData &throughput)
     : AdaptationAlgorithm(videoData, playbackData, bufferData, throughput),
       m_targetBuf(
-          30000000),  // [初始化] 设定目标缓冲区为 30秒 (30,000,000 微秒)
+          60000000),  //  [初始化] 设定目标缓冲区为 60秒 (30,000,000 微秒)
       m_delta(
           m_videoData.segmentDuration),  // [初始化] 波动范围设为一个切片的时长
-      m_alpha(12.0),  // [初始化] 稳定性权重，数值越大，算法越不愿意切换码率
+      m_alpha(1.0),
+      // 一开始是12 现在大幅减少
+      // [初始化] 稳定性权重，数值越大，算法越不愿意切换码率
       m_highestRepIndex(videoData.averageBitrate.size() -
                         1),  // [初始化] 获取最高码率档位
-      m_thrptThrsh(0.85)     // [初始化] 保守系数，只用估算带宽的 85%
+      m_thrptThrsh(0.95)
+// [初始化] 保守系数，只用估算带宽的 85%
+// 现在激进一点，用估算带宽的95%
 {
   NS_LOG_INFO(this);
-  m_smooth.push_back(
-      5);  // [参数] 必须在当前码率稳定坚持 5 个切片，才允许尝试升级
+  m_smooth.push_back(3);
+  // [参数] 必须在当前码率稳定坚持 5 个切片，才允许尝试升级
+  // 激进一点，稳定3个
   m_smooth.push_back(
       1);  // [参数] 每次升级只能升 1 个档位 (不能从 360p 直接跳到 1080p)
   NS_ASSERT_MSG(m_highestRepIndex >= 0,
@@ -59,8 +64,10 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
   answer.delayDecisionCase = 0;
 
   // [特殊情况] 如果是第一个切片，直接选最低码率（Index 0），快速起播
+  // v2 选择中等画质
   if (segmentCounter == 0) {
-    answer.nextRepIndex = 0;
+    // answer.nextRepIndex = 0;
+    answer.nextRepIndex = 3;
     answer.decisionCase = 0;
     return answer;
   }
@@ -71,9 +78,18 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
   int64_t bufferNow = m_bufferData.bufferLevelNew.back() -
                       (timeNow - m_throughput.transmissionEnd.back());
 
+  // 缓冲区的缓冲数据有30s时，就请求下一个等级的码率
+  if (bufferNow >= 30000000 && bufferNow < m_targetBuf) {
+    answer.nextRepIndex++;
+    answer.decisionCase = 0;
+    return answer;
+  }
+
   // [冷启动保护] 如果历史传输记录少于 20 个，数据不足以做复杂计算，保持最低码率
-  if (m_throughput.transmissionEnd.size() < 20) {
-    answer.nextRepIndex = 0;
+  // v2 选择中等画质 同时激进一点，改为 3个
+  if (m_throughput.transmissionEnd.size() < 3) {
+    // answer.nextRepIndex = 0;
+    answer.nextRepIndex = 3;
     answer.decisionCase = 1;
     return answer;
   }
@@ -93,7 +109,8 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
                     1000000.0)));
     }
     // 只取最近 20 个样本
-    if (thrptEstimationTmp.size() == 20) {
+    // 激进一点取3个
+    if (thrptEstimationTmp.size() == 3) {
       break;
     }
   }

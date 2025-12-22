@@ -672,7 +672,8 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
 // 读取段大小文件
 int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile,
                                                 bool isVideo) {
-  NS_LOG_FUNCTION(this << segmentSizeFile << (isVideo ? "视频" : "音频"));
+  std::string info = isVideo ? "视频" : "音频";
+  NS_LOG_FUNCTION(this << segmentSizeFile << info);
 
   std::ifstream myfile;                  // 文件输入流
   myfile.open(segmentSizeFile.c_str());  // 打开文件
@@ -714,6 +715,10 @@ int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile,
     streamData->m_segmentData.averageBitrate.push_back(
         (8.0 * averageByteSizeTemp) /
         (streamData->m_segmentDuration / 1000000.0));
+  }
+  // 将块的平均比特率输出到日志中
+  for (double i : streamData->m_segmentData.averageBitrate) {
+    NS_LOG_INFO(info << "  averageBitrate(Mbps): " << i / 1e6);
   }
 
   // 确保成功读取数据

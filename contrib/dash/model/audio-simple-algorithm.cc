@@ -2,6 +2,7 @@
 
 #include "audio-simple-algorithm.h"
 
+// #include "cstdio"
 #include "ns3/log.h"
 #include "ns3/simulator.h"
 
@@ -18,7 +19,7 @@ AudioSimpleAlgorithm::AudioSimpleAlgorithm(const videoData& videoData,
                                            const throughputData& throughput)
     : AdaptationAlgorithm(videoData, playbackData, bufferData, throughput),
       m_targetBuf(60000000),  // [修改点1] 目标缓冲设为 60秒
-                              // (视频通常30秒)。音频小，多存点。
+      // (视频通常30秒)。音频小，多存点。
       m_thrptThrsh(0.95),  // [修改点2] 阈值设为 0.95。音频流稳定，可以利用 95%
                            // 的估算带宽。
       m_highestRepIndex(videoData.averageBitrate.size() - 1),
@@ -35,8 +36,10 @@ algorithmReply AudioSimpleAlgorithm::GetNextRep(const int64_t segmentCounter,
   answer.delayDecisionCase = 0;
 
   // 1. 起播阶段：直接选最低音质，确保秒开
+  // v2 起播阶段选择中等音质
   if (segmentCounter == 0) {
-    answer.nextRepIndex = 0;
+    // answer.nextRepIndex = 0;
+    answer.nextRepIndex = 3;
     answer.decisionCase = 0;
     return answer;
   }
@@ -45,24 +48,33 @@ algorithmReply AudioSimpleAlgorithm::GetNextRep(const int64_t segmentCounter,
   int64_t bufferNow = m_bufferData.bufferLevelNew.back() -
                       (timeNow - m_throughput.transmissionEnd.back());
 
+  // 缓冲区的缓冲数据有30s时，就请求下一个等级的码率
+  if (bufferNow >= 30000000 && bufferNow < m_targetBuf) {
+    answer.nextRepIndex++;
+    answer.decisionCase = 0;
+    return answer;
+  }
+
   // [修改点3] 简单的休眠逻辑
   // 如果缓冲超过 60秒，就暂停下载，直到缓冲降到 60秒以下。
   // 不需要Festive那种复杂的随机化，音频简单直接最好。
   if (bufferNow > m_targetBuf) {
+    // std::cout << bufferNow << m_targetBuf;
     answer.nextDownloadDelay = bufferNow - m_targetBuf;
     // 保持当前码率，但延迟请求
     answer.nextRepIndex = m_playbackData.playbackIndex.back();
     answer.decisionCase = 1;
-    answer.nextDownloadDelay = 1;
     return answer;
   }
 
   // 2. 带宽估算 (保留 Festive 的调和平均数逻辑，因为它抗干扰能力强)
   // 如果样本太少，保持最低音质
+  // v2 保持中等音质
   if (m_throughput.transmissionEnd.size() <
       5)  // 音频切片小，5个样本大概就能看了
   {
-    answer.nextRepIndex = 0;
+    // answer.nextRepIndex = 0;
+    answer.nextRepIndex = 3;
     answer.decisionCase = 2;
     return answer;
   }
@@ -76,7 +88,7 @@ algorithmReply AudioSimpleAlgorithm::GetNextRep(const int64_t segmentCounter,
         ((double)((m_throughput.transmissionEnd.at(sd) -
                    m_throughput.transmissionRequested.at(sd)) /
                   1000000.0)));
-    if (thrptEstimationTmp.size() == 10) break;  // 音频取最近10个样本即可
+    if (thrptEstimationTmp.size() == 3) break;  // 音频取最近10个样本即可
   }
 
   double harmonicMeanDenominator = 0;
@@ -89,7 +101,6 @@ algorithmReply AudioSimpleAlgorithm::GetNextRep(const int64_t segmentCounter,
   int64_t currentRepIndex = m_playbackData.playbackIndex.back();
   int64_t nextRepIndex = currentRepIndex;
 
-  // [紧急降级]：缓冲太低 (<10秒) 或者 带宽严重不足
   // 如果带宽连当前码率的 95% 都达不到，必须立刻降级，保流畅。
   if (m_videoData.averageBitrate.at(currentRepIndex) >
       thrptEstimation * m_thrptThrsh) {
