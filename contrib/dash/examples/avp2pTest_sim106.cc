@@ -179,8 +179,10 @@ int main(int argc, char *argv[]) {
   // uint16_t ClientId1 = 1;
   // uint16_t ClientId2 = 2;
 
-  std::string video_adaptationAlgo = "festive";
-  std::string audio_adaptationAlgo = "simple";
+  std::string video_adaptationAlgo = "bba";
+  std::string audio_adaptationAlgo = "bba";
+  std::string videoDir = "video_" + video_adaptationAlgo;
+  std::string audioDir = "audio_" + audio_adaptationAlgo;
   std::string videosegmentSizeFilePath = "contrib/dash/videosegmentSizes.txt";
   std::string audiosegmentSizeFilePath = "contrib/dash/audiosegmentSizes.txt";
 
@@ -192,8 +194,8 @@ int main(int argc, char *argv[]) {
   std::string basePrefix = dashLogDirectory + "/sim" +
                            std::to_string(simulationId) + "_" + "cl" +
                            std::to_string(numberOfClients);
-  std::string videoPrefix = basePrefix + "/" + video_adaptationAlgo;
-  std::string audioPrefix = basePrefix + "/" + audio_adaptationAlgo;
+  std::string videoPrefix = basePrefix + "/" + videoDir;
+  std::string audioPrefix = basePrefix + "/" + audioDir;
   // c_str() 将 std::string 转为 const char* 类型，因为 mkdir 函数需要 const
   // char* 参数
   const char *mylogsDir = dashLogDirectory.c_str();
@@ -451,7 +453,7 @@ int main(int argc, char *argv[]) {
   Simulator::Schedule(Seconds(1.0), &ReportBandwidthShare);
 
   // 每秒读取带宽trace，模拟时变的瓶颈链路
-  LoadBandwidthTrace("trace_v5.txt");
+  LoadBandwidthTrace("trace_v2.txt");
   Simulator::Schedule(Seconds(0.0), &UpdateLinkBandwidth, bottleneckDev, 0);
 
   Simulator::Stop(Seconds(399));

@@ -4,8 +4,10 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <queue>
 
-#include "audio-simple-algorithm.h"
+#include "audio-festive.h"
+#include "bba.h"
 #include "festive.h"
 #include "ns3/application.h"
 #include "ns3/event-id.h"
@@ -188,6 +190,8 @@ class MultiTcpAvStreamClient : public Application {
     controllerState state;  //!< 当前状态机状态
 
     bool m_SegmentReceived;  //!< 段是否已接收
+
+    std::queue<int64_t> m_ptsQueue;  // 每段 segment 的 PTS（显示时间）
   };
 
   virtual void StartApplication(void);
@@ -198,7 +202,8 @@ class MultiTcpAvStreamClient : public Application {
   std::string ToStringControllerEvent(controllerEvent event);
   std::string ToStringStreamType(StreamType type);
   std::string ToStringControllerState(controllerState state);
-  void PlaybackController(controllerEvent event);
+
+  void Controller_AV(controllerEvent event, StreamType type);
 
   /**
    * 设置包数据内容，将 T & message 字符串的以零结尾内容填充到 m_data 中
@@ -277,11 +282,28 @@ class MultiTcpAvStreamClient : public Application {
   int ReadInBitrateValues(std::string segmentSizeFile, bool isVideo);
 
   /**
-   * \brief AV 同步播放：当 A/V都启用时，
-   * 统一调用此函数进行同时播放并记录时间上面的播放差异。
+   * \brief AV 同步播放
+   * 统一调用此函数进行音频、视频同步播放
+   * 以视频的播放时钟作为主时钟
    * \return false 表示成功播放（双方都播放了一段），true 表示未播放。
    */
   bool PlaybackHandleAV();
+
+  bool PlaybackHandleAV(StreamData& stream);
+  /**
+   * \brief 尝试 AV 同步播放
+   * 以视频的播放时钟作为主时钟
+   * \return false 表示成功播放（双方都播放了一段），true 表示未播放。
+   */
+  void TryStartPlayback();
+
+  /**
+   * \brief
+   * 判断音频、视频是否可以一起播放，换言之就是音频、视频缓冲区是否同时都有时间可以播放
+   * \return false 不可以一起播放(都没有数据/只有一方有数据)，
+   *  true 表示可以一起播放(音频、视频缓冲区都有数据)。
+   */
+  bool CanPlayAvTogether();
 
   /**
    * \brief 对单个流控制/模拟播放过程
@@ -398,6 +420,9 @@ class MultiTcpAvStreamClient : public Application {
 
   std::ofstream m_avSyncLog;             //!< 记录同步/不同步的情况
   const int64_t m_syncWindowUs = 50000;  // 50 ms 的宽松窗口（微秒）
+
+  int64_t videoPts;
+  int64_t audioPts;
 };
 
 }  // namespace ns3

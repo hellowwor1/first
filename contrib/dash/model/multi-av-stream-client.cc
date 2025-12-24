@@ -53,6 +53,155 @@ NS_LOG_COMPONENT_DEFINE("MultiTcpAvStreamClientApplication");
 // 确保MultiTcpAvStreamClient类型在NS3对象系统中注册
 NS_OBJECT_ENSURE_REGISTERED(MultiTcpAvStreamClient);
 
+void MultiTcpAvStreamClient::Controller_AV(controllerEvent event,
+                                           StreamType type) {
+  StreamData& streamdata =
+      (type == VIDEO_STREAM ? m_videoStream : m_audioStream);
+  NS_LOG_FUNCTION(this << ToStringControllerState(streamdata.state)
+                       << ToStringControllerEvent(event)
+                       << ToStringStreamType(type));  // 记录函数调用和事件
+  // 初始状态处理
+  if (streamdata.state == initial) {
+    // 为流请求码率索引
+    RequestRepIndex(&streamdata);  // 请求视频流码率索引
+
+    // 发送流的下载请求
+    // 发送段请求
+    Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
+             .at(streamdata.m_segmentCounter),
+         &streamdata);
+
+    streamdata.state = downloading;  // 切换到下载状态
+
+    return;
+  }
+  // 下载状态处理
+  if (streamdata.state == downloading) {
+    bool playRes = PlaybackHandleAV(streamdata);  // 尝试播放缓冲区中的段
+    // 检查是否还有段需要播放
+    if (streamdata.m_currentPlaybackIndex <= streamdata.m_lastSegmentIndex) {
+      // 流的下载计数器加1
+      streamdata.m_segmentCounter++;
+      // 为流请求下一段的码率索引
+      RequestRepIndex(&streamdata);
+      streamdata.state = downloadingPlaying;  // 切换到下载+播放状态
+      // 发送流的下一段请求
+      Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
+               .at(streamdata.m_segmentCounter),
+           &streamdata);
+    } else {
+      // 所有段都已下载，切换到播放状态
+      streamdata.state = playing;
+    }
+    // 调度下一次播放完成事件
+    if (!playRes) {
+      controllerEvent ev = playbackFinished;
+      Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
+                          &MultiTcpAvStreamClient::Controller_AV, this, ev,
+                          type);
+    } else {
+      // 因为对方流没有准备好,无法播放 等100ms再试试
+      controllerEvent ev = playbackFinished;
+      Simulator::Schedule(MicroSeconds(100000),
+                          &MultiTcpAvStreamClient::Controller_AV, this, ev,
+                          type);
+    }
+    return;
+  }
+  // 如果当前状态是 downloadingPlaying（下载+播放）
+  if (streamdata.state == downloadingPlaying) {
+    if (event == downloadFinished) {  // 如果触发事件是下载完成
+      if (streamdata.m_segmentCounter <
+          streamdata.m_lastSegmentIndex) {  // 如果还有 segment 待下载
+        streamdata.m_segmentCounter++;      // 下载计数器 +1
+        RequestRepIndex(&streamdata);       // 获取下一段码率索引
+      }
+      // 如果缓冲区状况很好，就停止一段时间下载，只播放
+      if (streamdata.m_bDelay > 0 &&
+          streamdata.m_segmentCounter <= streamdata.m_lastSegmentIndex) {
+        /*  e_dirs */  // 延迟下载事件标记
+        NS_LOG_INFO(this << "延迟下载事件发生" << streamdata.m_bDelay
+                         << ToStringControllerState(streamdata.state)
+                         << ToStringControllerEvent(event)
+                         << ToStringStreamType(type));  // 记录函数调用和事件
+        streamdata.state = playing;                     // 切换到播放状态
+        controllerEvent ev = irdFinished;  // 设置事件为延迟下载完成
+        // 调度延迟事件触发
+        Simulator::Schedule(MicroSeconds(streamdata.m_bDelay),
+                            &MultiTcpAvStreamClient::Controller_AV, this, ev,
+                            type);
+      } else if (streamdata.m_segmentCounter ==
+                 streamdata.m_lastSegmentIndex) {  // 如果当前下载最后一段
+        /*  e_df */                                // 下载完成标记
+        streamdata.state = playing;                // 切换为播放状态
+      } else {                                     // 如果还有 segment 待下载
+        /*  e_d */                                 // 下载事件标记
+        // 发送下一段下载请求
+        Send(streamdata.m_segmentData.segmentSize
+                 .at(streamdata.m_currentRepIndex)
+                 .at(streamdata.m_segmentCounter),
+             &streamdata);
+      }
+    } else if (event == playbackFinished) {     // 如果触发事件是播放完成
+      if (!PlaybackHandleAV(streamdata)) {      // 尝试播放下一段，如果返回
+                                                // false 表示缓冲中还有segment
+        /*  e_pb */                             // 播放缓冲标记
+        controllerEvent ev = playbackFinished;  // 设置播放完成事件
+        // 调度下一次播放完成事件
+        Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
+                            &MultiTcpAvStreamClient::Controller_AV, this, ev,
+                            type);
+      } else {  // 缓冲为空， 或者 另一个流没有准备好，无法播放
+        if (streamdata.m_segmentsInBuffer > 0) {
+          // 另一个流没有准备好，无法播放
+          // 等 100ms再试试
+          controllerEvent ev = playbackFinished;
+          Simulator::Schedule(MicroSeconds(100000),
+                              &MultiTcpAvStreamClient::Controller_AV, this, ev,
+                              type);
+        } else {
+          // 确实是本流没有数据导致播放失败了，切换回下载状态，等待下载
+          /*  e_pu */                      // 播放空缓冲标记
+          streamdata.state = downloading;  // 切换回只下载状态
+        }
+      }
+    }
+    return;  // 结束本次 Controller 调用
+  }
+  // 如果当前状态是 playing（只播放）
+  if (streamdata.state == playing) {
+    if (event == irdFinished) {               // 如果延迟下载事件完成
+      /*  e_irc */                            // 延迟下载完成标记
+      streamdata.state = downloadingPlaying;  // 状态切换回下载+播放
+      // 发送当前段下载请求
+      Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
+               .at(streamdata.m_segmentCounter),
+           &streamdata);
+    } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex <
+                                                streamdata.m_lastSegmentIndex) {
+      // 如果播放完成，且还有 segment 没有播放完
+      /*  e_pb */                                   // 播放完成标记
+      bool playRes = PlaybackHandleAV(streamdata);  // 播放缓冲区中的 segment
+      if (!playRes) {
+        controllerEvent ev = playbackFinished;  // 生成播放完成事件
+        // 调度下一次播放完成事件
+        Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
+                            &MultiTcpAvStreamClient::Controller_AV, this, ev,
+                            type);
+      } else {
+      }
+
+    } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex ==
+                                                streamdata.m_lastSegmentIndex) {
+      // 如果播放完成，且已经是最后的segment
+      PlaybackHandleAV(streamdata);  // 播放最后一段
+      /*  e_pf */                    // 播放完成标记
+      streamdata.state = terminal;   // 状态切换为终止
+      StopApplication();             // 停止客户端应用
+    }
+    return;  // 结束本次 Controller 调用
+  }
+}
 void MultiTcpAvStreamClient::Controller(controllerEvent event,
                                         StreamType type) {
   StreamData& streamdata =
@@ -107,17 +256,16 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
         streamdata.m_segmentCounter++;      // 下载计数器 +1
         RequestRepIndex(&streamdata);       // 获取下一段码率索引
       }
-
+      // 如果缓冲区状况很好，就停止一段时间下载，只播放
       if (streamdata.m_bDelay > 0 &&
           streamdata.m_segmentCounter <= streamdata.m_lastSegmentIndex) {
         /*  e_dirs */  // 延迟下载事件标记
-        NS_LOG_FUNCTION(this
-                        << "延迟下载事件发生" << streamdata.m_bDelay
-                        << ToStringControllerState(streamdata.state)
-                        << ToStringControllerEvent(event)
-                        << ToStringStreamType(type));  // 记录函数调用和事件
-        streamdata.state = playing;                    // 切换到播放状态
-        controllerEvent ev = irdFinished;              // 设置事件为延迟下载完成
+        NS_LOG_INFO(this << "延迟下载事件发生" << streamdata.m_bDelay
+                         << ToStringControllerState(streamdata.state)
+                         << ToStringControllerEvent(event)
+                         << ToStringStreamType(type));  // 记录函数调用和事件
+        streamdata.state = playing;                     // 切换到播放状态
+        controllerEvent ev = irdFinished;  // 设置事件为延迟下载完成
         // 调度延迟事件触发
         Simulator::Schedule(MicroSeconds(streamdata.m_bDelay),
                             &MultiTcpAvStreamClient::Controller, this, ev,
@@ -136,8 +284,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
       }
     } else if (event == playbackFinished) {     // 如果触发事件是播放完成
       if (!PlaybackHandleSingle(streamdata)) {  // 尝试播放下一段，如果返回
-                                                // false 表示缓冲中还有
-        // segment
+                                                // false 表示缓冲中还有segment
         /*  e_pb */                             // 播放缓冲标记
         controllerEvent ev = playbackFinished;  // 设置播放完成事件
         // 调度下一次播放完成事件
@@ -180,6 +327,7 @@ void MultiTcpAvStreamClient::Controller(controllerEvent event,
     return;  // 结束本次 Controller 调用
   }
 }
+
 std::string MultiTcpAvStreamClient::ToStringStreamType(StreamType type) {
   switch (type) {
     case VIDEO_STREAM:
@@ -224,8 +372,6 @@ MultiTcpAvStreamClient::ToStringControllerState(controllerState state) {
       return "";
   }
 }
-
-void MultiTcpAvStreamClient::PlaybackController(controllerEvent event) {}
 
 // 获取类型标识函数
 TypeId MultiTcpAvStreamClient::GetTypeId(void) {
@@ -404,6 +550,10 @@ void MultiTcpAvStreamClient::Initialise(std::string video_algorithm,
       m_videoStream.algo = new FestiveAlgorithm(
           m_videoStream.m_segmentData, m_videoStream.m_playbackData,
           m_videoStream.m_bufferData, m_videoStream.m_throughput);
+    } else if (video_algorithm == "bba") {
+      m_videoStream.algo = new BbaAlgorithm(
+          m_videoStream.m_segmentData, m_videoStream.m_playbackData,
+          m_videoStream.m_bufferData, m_videoStream.m_throughput);
     } else {
       NS_LOG_ERROR("Invalid video_algorithm name entered. Terminating.");
       StopApplication();
@@ -431,8 +581,12 @@ void MultiTcpAvStreamClient::Initialise(std::string video_algorithm,
     // m_audioStream.algo = nullptr;
 
     // 为音频流创建自适应算法对象
-    if (audio_algorithm == "simple") {
-      m_audioStream.algo = new AudioSimpleAlgorithm(
+    if (audio_algorithm == "festive") {
+      m_audioStream.algo = new AudioFestiveAlgorithm(
+          m_audioStream.m_segmentData, m_audioStream.m_playbackData,
+          m_audioStream.m_bufferData, m_audioStream.m_throughput);
+    } else if (audio_algorithm == "bba") {
+      m_audioStream.algo = new BbaAlgorithm(
           m_audioStream.m_segmentData, m_audioStream.m_playbackData,
           m_audioStream.m_bufferData, m_audioStream.m_throughput);
     } else {
@@ -555,11 +709,6 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
                    << streamData->m_bytesReceived << "/" << expectedSize
                    << " bytes");
       // 更新段接收状态
-      // if (streamType == VIDEO_STREAM) {
-      //   m_videoSegmentReceived = true;
-      // } else {
-      //   m_audioSegmentReceived = true;
-      // }
       streamData->m_SegmentReceived = true;
 
       // 处理段接收完成
@@ -622,20 +771,31 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
       如果结果为负数，则取0，保证缓冲量不会为负
       理论来说不会为负数。结果为负数，说明这个流存在卡顿，应当格外注意！
     */
+    /*
+      在多流播放的系统里面，这一部分还存在问题
+      “  old buffer level = 上一次缓冲量 - 自上次接收完成以来播放消耗的时间 ”
+      这是不对的，因为“上次接收完成以来播放消耗的时间”不再等于上次传输结束时间-这次传输结束时间
+      因为中间可能因为对方流缓冲不足而停止播放，因此每个流播放一段，缓冲区就减去一段这样精确
+      因此在播放函数里面统计缓冲区水平,问题是如果可以播放，在播放过程中下载完成了，如何统计缓冲区水平呢？
+    */
+    // streamData->m_bufferData.bufferLevelOld.push_back(
+    //     std::max(streamData->m_bufferData.bufferLevelNew.back() -
+    //                  (streamData->m_transmissionEndReceivingSegment -
+    //                   streamData->m_throughput.transmissionEnd.back()),
+    //              (int64_t)0));
     streamData->m_bufferData.bufferLevelOld.push_back(
-        std::max(streamData->m_bufferData.bufferLevelNew.back() -
-                     (streamData->m_transmissionEndReceivingSegment -
-                      streamData->m_throughput.transmissionEnd.back()),
-                 (int64_t)0));
+        streamData->m_segmentsInBuffer * streamData->m_segmentDuration);
   } else {
     // 第一段，旧缓冲量为0
     streamData->m_bufferData.bufferLevelOld.push_back(0);
   }
 
-  // 计算新缓冲量
+  // 计算新缓冲量 = 旧缓冲量+新接受的段持续时间
+  // streamData->m_bufferData.bufferLevelNew.push_back(
+  //     streamData->m_bufferData.bufferLevelOld.back() +
+  //     streamData->m_segmentDuration);
   streamData->m_bufferData.bufferLevelNew.push_back(
-      streamData->m_bufferData.bufferLevelOld.back() +
-      streamData->m_segmentDuration);
+      (streamData->m_segmentsInBuffer + 1) * streamData->m_segmentDuration);
 
   // 记录吞吐量相关信息
   streamData->m_throughput.bytesReceived.push_back(
@@ -657,16 +817,22 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
   // 重置已接收字节数
   streamData->m_bytesReceived = 0;
   streamData->m_SegmentReceived = false;
-
+  streamData->m_ptsQueue.push((streamData->m_segmentCounter + 1) *
+                              streamData->m_segmentDuration);
+  std::string streamName = streamData->m_type == 0 ? "视频流 " : "音频流 ";
+  NS_LOG_INFO(streamName << " 的 pts队列数据 "
+                         << streamData->m_ptsQueue.back());
   // 缓冲区里面的段数加1
   streamData->m_segmentsInBuffer++;
+
   if (streamData->m_segmentCounter == streamData->m_lastSegmentIndex) {
     streamData->m_bDelay = 0;
   }
 
   // 通知Controller下载完成事件
   controllerEvent event = downloadFinished;
-  Controller(event, streamType);
+  // Controller(event, streamType);
+  Controller_AV(event, streamType);
 }
 
 // 读取段大小文件
@@ -740,16 +906,15 @@ int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile,
 bool MultiTcpAvStreamClient::PlaybackHandleSingle(StreamData& stream) {
   // 当前模拟时间（微秒）
   int64_t timeNow = Simulator::Now().GetMicroSeconds();
-  std::string s1 =
-      "播放第 " + std::to_string(stream.m_currentPlaybackIndex) + " 段 ";
+  std::string s1 = ToStringStreamType(stream.m_type) + " 播放第 " +
+                   std::to_string(stream.m_currentPlaybackIndex) + " 段 ";
   // 如果缓冲区为空且还有剩余段未播放，说明发生缓冲不足（buffer underrun）
   if (stream.m_segmentsInBuffer == 0 &&
       stream.m_currentPlaybackIndex < stream.m_lastSegmentIndex &&
       !stream.m_bufferUnderrun) {
     stream.m_bufferUnderrun = true;  // 标记缓冲不足
-    NS_LOG_FUNCTION(s1 << "但是缓存不足无法播放 "
-                       << ToStringStreamType(stream.m_type)
-                       << timeNow / (double)1000000);  // 日志宏
+    NS_LOG_INFO(s1 << " 缓存不足无法播放 "
+                   << timeNow / (double)1000000);  // 日志宏
     // 写入缓冲不足日志：记录开始时间
     stream.bufferUnderrunLog << std::setfill(' ') << std::setw(26)
                              << timeNow / (double)1000000 << " ";
@@ -766,8 +931,8 @@ bool MultiTcpAvStreamClient::PlaybackHandleSingle(StreamData& stream) {
       stream.bufferUnderrunLog.flush();
     }
 
-    NS_LOG_FUNCTION(s1 << ToStringStreamType(stream.m_type)
-                       << timeNow / (double)1000000);  // 日志宏
+    NS_LOG_INFO(s1 << ToStringStreamType(stream.m_type)
+                   << timeNow / (double)1000000);  // 日志宏
     // 将当前播放段开始时间存入播放日志
     stream.m_playbackData.playbackStart.push_back(timeNow);
     LogPlayback(stream.m_type);       // 写入播放日志
@@ -779,93 +944,191 @@ bool MultiTcpAvStreamClient::PlaybackHandleSingle(StreamData& stream) {
   return true;  // 返回 true 表示已经全部播放完了
 }
 
+// 音频+视频 buffer 都有数据才会返回true
+bool MultiTcpAvStreamClient::CanPlayAvTogether() {
+  NS_LOG_FUNCTION(this);
+  bool res = true;
+  NS_LOG_INFO("视频 流的 m_currentPlaybackIndex: "
+              << m_videoStream.m_currentPlaybackIndex
+              << "   m_segmentsInBuffer:" << m_videoStream.m_segmentsInBuffer
+              << "  m_bufferUnderrun: " << m_videoStream.m_bufferUnderrun);
+  NS_LOG_INFO("音频 流的 m_currentPlaybackIndex: "
+              << m_audioStream.m_currentPlaybackIndex
+              << "   m_segmentsInBuffer:" << m_audioStream.m_segmentsInBuffer
+              << "  m_bufferUnderrun: " << m_audioStream.m_bufferUnderrun);
+  // 视频 buffer 必须有
+  if (m_videoStream.m_currentPlaybackIndex ==
+      m_audioStream.m_currentPlaybackIndex) {
+    if (m_videoStream.m_segmentsInBuffer == 0 &&
+        m_videoStream.m_currentPlaybackIndex <
+            m_videoStream.m_lastSegmentIndex &&
+        !m_videoStream.m_bufferUnderrun) {
+      m_videoStream.m_bufferUnderrun = true;
+      res = false;
+    }
+    // 音频 buffer 必须有
+    if (m_audioStream.m_segmentsInBuffer == 0 &&
+        m_audioStream.m_currentPlaybackIndex <
+            m_audioStream.m_lastSegmentIndex &&
+        !m_audioStream.m_bufferUnderrun) {
+      m_audioStream.m_bufferUnderrun = true;
+      res = false;
+    }
+  }
+  NS_LOG_INFO("视频 流的 m_currentPlaybackIndex: "
+              << m_videoStream.m_currentPlaybackIndex
+              << "   m_segmentsInBuffer:" << m_videoStream.m_segmentsInBuffer
+              << "  m_bufferUnderrun: " << m_videoStream.m_bufferUnderrun);
+  NS_LOG_INFO("音频 流的 m_currentPlaybackIndex: "
+              << m_audioStream.m_currentPlaybackIndex
+              << "   m_segmentsInBuffer:" << m_audioStream.m_segmentsInBuffer
+              << "  m_bufferUnderrun: " << m_audioStream.m_bufferUnderrun);
+
+  return res;
+}
+
+bool MultiTcpAvStreamClient::PlaybackHandleAV(StreamData& stream) {
+  NS_LOG_FUNCTION(this);
+  int64_t timeNow = Simulator::Now().GetMicroSeconds();
+  std::string streamName = stream.m_type == VIDEO_STREAM ? "视频" : "音频";
+  StreamData* r_stream =
+      stream.m_type == VIDEO_STREAM ? &m_audioStream : &m_videoStream;
+  std::string s1 = ToStringStreamType(stream.m_type) + " 尝试播放第 " +
+                   std::to_string(stream.m_currentPlaybackIndex) + " 段 ";
+  NS_LOG_INFO(s1);
+  if (!CanPlayAvTogether()) {
+    if (stream.m_bufferUnderrun) {
+      NS_LOG_INFO(streamName
+                  << "段 " << stream.m_currentPlaybackIndex
+                  << " 缓存不足无法播放(已记录日志，缓存不足开始时间) "
+                  << timeNow / (double)1000000);  // 日志宏
+      // 写入缓冲不足日志：记录开始时间
+
+      stream.bufferUnderrunLog << std::setfill(' ') << std::setw(26)
+                               << timeNow / (double)1000000 << " ";
+      stream.bufferUnderrunLog.flush();  // 立即刷新到文件
+    }
+    if (r_stream->m_bufferUnderrun) {
+      // 对方流缓冲不足，不能播放
+      std::string r_streamName =
+          VIDEO_STREAM == stream.m_type ? "对方音频流" : "对方视频流";
+      NS_LOG_INFO(r_streamName
+                  << "段 " << stream.m_currentPlaybackIndex
+                  << " 缓存不足无法播放(已记录日志，缓存不足开始时间) "
+                  << timeNow / (double)1000000);  // 日志宏
+      r_stream->bufferUnderrunLog << std::setfill(' ') << std::setw(26)
+                                  << timeNow / (double)1000000 << " ";
+      r_stream->bufferUnderrunLog.flush();  // 立即刷新到文件
+    }
+    return true;  // 缓冲不足,无法播放
+  } else if (stream.m_segmentsInBuffer > 0) {
+    if (stream.m_bufferUnderrun) {  // 如果之前缓冲不足，标记已恢复
+      stream.m_bufferUnderrun = false;
+      NS_LOG_INFO(streamName
+                  << "段 " << stream.m_currentPlaybackIndex
+                  << " 缓存足够，可以恢复(已记录日志，缓存不足结束时间) "
+                  << timeNow / (double)1000000);  // 日志宏
+      stream.bufferUnderrunLog << std::setfill(' ') << std::setw(13)
+                               << timeNow / (double)1000000
+                               << "\n";  // 记录缓冲恢复时间
+      stream.bufferUnderrunLog.flush();
+    }
+
+    // 获取当前段的 PTS
+    videoPts = std::max(videoPts, m_videoStream.m_ptsQueue.empty()
+                                      ? 0
+                                      : m_videoStream.m_ptsQueue.front());
+    audioPts = std::max(audioPts, m_audioStream.m_ptsQueue.empty()
+                                      ? 0
+                                      : m_audioStream.m_ptsQueue.front());
+    int64_t currentPts = stream.m_ptsQueue.front();
+    NS_LOG_INFO("currentPts " << currentPts << "  videoPts " << videoPts
+                              << "  audioPts " << audioPts);  // 日志宏
+    // 统一按最小 PTS 播放，保证 AV 同步
+    int64_t playPts = std::min(videoPts, audioPts);
+    // 播放
+    if (currentPts <= playPts) {
+      stream.m_playbackData.playbackStart.push_back(timeNow);
+
+      NS_LOG_INFO(streamName << "段 " << stream.m_currentPlaybackIndex
+                             << "可以播放 "
+                             << timeNow / (double)1000000);  // 日志宏
+      LogPlayback(stream.m_type);                            // 写入播放日志
+      stream.m_segmentsInBuffer--;
+      stream.m_currentPlaybackIndex++;
+      stream.m_ptsQueue.pop();
+      // 将这个播放时间统计到位，用来计算缓冲区长度
+
+      return false;  // 返回 false 表示播放成功
+    } else {
+      // 因为pts过大，无法播放
+      NS_LOG_INFO("段 " << stream.m_currentPlaybackIndex
+                        << " 比另一个流播放的块多了， 无法播放 "
+                        << timeNow / (double)1000000);  // 日志宏
+    }
+  }
+  return true;
+}
 // 处理多流播放的函数
 bool MultiTcpAvStreamClient::PlaybackHandleAV() {
   NS_LOG_FUNCTION(this);
 
-  int64_t timeNow = Simulator::Now().GetMicroSeconds();  // 获取当前时间
-
-  // 必须同时启用并检查缓冲
-  bool vEnabled =
-      (m_streamSelection == AUDIO_VIDEO || m_streamSelection == VIDEO_ONLY);
-  bool aEnabled =
-      (m_streamSelection == AUDIO_VIDEO || m_streamSelection == AUDIO_ONLY);
-
-  if (!vEnabled && aEnabled) {
-    // 只有音频：降级为单流播放
-    return PlaybackHandleSingle(m_audioStream);
-  }
-  if (!aEnabled && vEnabled) {
-    // 只有视频：降级为单流播放
-    return PlaybackHandleSingle(m_videoStream);
-  }
-  // 多流情况
-  // 检查两个 buffer 是否都有数据
-  // 如果缓冲区为空且还有剩余段未播放，说明发生缓冲不足（buffer underrun）
-  // 任何一方为空都不能进行同步播放：记录 underrun 并返回未播放
-  if (IsBufferEmpty(VIDEO_STREAM) || IsBufferEmpty(AUDIO_STREAM)) {
-    if (IsBufferEmpty(VIDEO_STREAM)) {
-      m_videoStream.m_bufferUnderrun = true;
+  int64_t timeNow = Simulator::Now().GetMicroSeconds();
+  std::string s1 = "播放 视频 第 " +
+                   std::to_string(m_videoStream.m_currentPlaybackIndex) +
+                   " 段 ";
+  std::string s2 = "播放 音频 第 " +
+                   std::to_string(m_audioStream.m_currentPlaybackIndex) +
+                   " 段 ";
+  NS_LOG_INFO(s1 << s2);
+  // 核心判断：是否允许 A/V 同时播放
+  if (!CanPlayAvTogether()) {
+    if (m_videoStream.m_bufferUnderrun) {
+      NS_LOG_INFO("视频段 " << m_videoStream.m_currentPlaybackIndex
+                            << " 缓存不足无法播放 "
+                            << timeNow / (double)1000000);  // 日志宏
+      // 写入缓冲不足日志：记录开始时间
       m_videoStream.bufferUnderrunLog << std::setfill(' ') << std::setw(26)
                                       << timeNow / (double)1000000 << " ";
-      m_videoStream.bufferUnderrunLog.flush();
-
-      // 现在视频缓冲区耗尽了，如果音频缓冲区还有则需要记录不此时同步
-      if (!IsBufferEmpty(AUDIO_STREAM)) {
-      }
+      m_videoStream.bufferUnderrunLog.flush();  // 立即刷新到文件
     }
-    if (IsBufferEmpty(AUDIO_STREAM)) {
-      m_audioStream.m_bufferUnderrun = true;
+    if (m_audioStream.m_bufferUnderrun) {
+      NS_LOG_INFO("视频段 " << m_audioStream.m_currentPlaybackIndex
+                            << " 缓存不足无法播放 "
+                            << timeNow / (double)1000000);  // 日志宏
+      // 写入缓冲不足日志：记录开始时间
       m_audioStream.bufferUnderrunLog << std::setfill(' ') << std::setw(26)
                                       << timeNow / (double)1000000 << " ";
-      m_audioStream.bufferUnderrunLog.flush();
-
-      // 现在音频缓冲区耗尽了，如果视频缓冲区还有则需要记录此时不同步
-      if (!IsBufferEmpty(VIDEO_STREAM)) {
-      }
+      m_audioStream.bufferUnderrunLog.flush();  // 立即刷新到文件
     }
-
-    return true;
-  }
-  // <--------------------------------------------------->
-  if (m_videoStream.m_segmentsInBuffer > 0) {
-    if (m_videoStream.m_bufferUnderrun) {  // 如果之前缓冲不足，标记已恢复
-      m_videoStream.m_bufferUnderrun = false;
-      m_videoStream.bufferUnderrunLog << std::setfill(' ') << std::setw(13)
-                                      << timeNow / (double)1000000
-                                      << "\n";  // 记录缓冲恢复时间
-      m_videoStream.bufferUnderrunLog.flush();
-    }
-  }
-  if (m_audioStream.m_segmentsInBuffer > 0) {
-    if (m_audioStream.m_bufferUnderrun) {  // 如果之前缓冲不足，标记已恢复
-      m_audioStream.m_bufferUnderrun = false;
-      m_audioStream.bufferUnderrunLog << std::setfill(' ') << std::setw(13)
-                                      << timeNow / (double)1000000
-                                      << "\n";  // 记录缓冲恢复时间
-      m_audioStream.bufferUnderrunLog.flush();
-    }
-  }
-  if (m_videoStream.m_segmentsInBuffer > 0 &&
-      m_audioStream.m_segmentsInBuffer > 0) {
-    /*
-       音视频缓冲区里面有数据
-       统计一个块的出缓冲区时间
-     */
-    // 记录播放开始时间（使用视频流的时间）
+    return true;  // 缓冲不足,无法播放
+  } else if (m_videoStream.m_segmentsInBuffer > 0 &&
+             m_audioStream.m_segmentsInBuffer > 0) {
+    // ====== A/V 同步播放 ======
+    // video
+    m_videoStream.m_segmentsInBuffer--;
+    m_videoStream.m_currentPlaybackIndex++;
     m_videoStream.m_playbackData.playbackStart.push_back(timeNow);
-    m_audioStream.m_playbackData.playbackStart.push_back(timeNow);
+    LogPlayback(VIDEO_STREAM);  // 写入播放日志
+    // audio
+    m_audioStream.m_segmentsInBuffer--;
+    m_audioStream.m_currentPlaybackIndex++;
+    m_videoStream.m_playbackData.playbackStart.push_back(timeNow);
+    LogPlayback(AUDIO_STREAM);  // 写入播放日志
+    // underrun 恢复
+    if (m_videoStream.m_bufferUnderrun) {
+      m_videoStream.m_bufferUnderrun = false;
+      m_videoStream.bufferUnderrunLog << timeNow / 1e6 << "\n";
+    }
+
+    if (m_audioStream.m_bufferUnderrun) {
+      m_audioStream.m_bufferUnderrun = false;
+      m_audioStream.bufferUnderrunLog << timeNow / 1e6 << "\n";
+    }
+
+    return false;  // 播放成功
   }
-
-  // 记录播放日志
-  LogPlayback(VIDEO_STREAM);
-  LogPlayback(AUDIO_STREAM);
-
-  // 更新缓冲区和播放索引
-  // m_segmentsInBuffer--;
-  // m_currentPlaybackIndex++;
-
-  return true;  // 表示所有的块都已经下载并播放完成
+  return true;  // 所有段全部播放完成
 }
 
 bool MultiTcpAvStreamClient::IsBufferEmpty(StreamType type) {
@@ -1075,7 +1338,8 @@ void MultiTcpAvStreamClient::StartStreamController(StreamType type) {
   controllerEvent event = init;  // 初始化该流的下载
 
   // 通知控制器开始调度该流
-  Controller(event, type);
+  // Controller(event, type);
+  Controller_AV(event, type);
 }
 
 // 连接失败回调
@@ -1202,10 +1466,12 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
   std::string basePrefix =
       dashLogDirectory + "/sim" + simulationId + "_" + "cl" + numberOfClients;
 
-  std::string videoPrefix = basePrefix + "/" + m_videoStream.m_algoName;
+  std::string videoPrefix =
+      basePrefix + "/" + "video_" + m_videoStream.m_algoName;
 
   // 初始化音频流日志文件
-  std::string audioPrefix = basePrefix + "/" + m_audioStream.m_algoName;
+  std::string audioPrefix =
+      basePrefix + "/" + "audio_" + m_audioStream.m_algoName;
 
   // 视频下载日志
   std::string vdLog = videoPrefix + "/downloadLog.txt";

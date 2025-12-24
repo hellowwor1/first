@@ -1,7 +1,7 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 
-#ifndef AUDIO_SIMPLE_ALGORITHM_H
-#define AUDIO_SIMPLE_ALGORITHM_H
+#ifndef AUDIO_FESTIVE_H
+#define AUDIO_FESTIVE_H
 
 #include <vector>
 
@@ -13,9 +13,9 @@ namespace ns3 {
  * \brief 专为音频设计的简化版 ABR 算法
  * 特点：更大的缓冲区目标，更简单的切换逻辑，去除了复杂的公平性随机化。
  */
-class AudioSimpleAlgorithm : public AdaptationAlgorithm {
+class AudioFestiveAlgorithm : public AdaptationAlgorithm {
  public:
-  AudioSimpleAlgorithm(
+  AudioFestiveAlgorithm(
       const videoData &videoData,  // 注意：实际上存的是音频码率信息
       const playbackData &playbackData, const bufferData &bufferData,
       const throughputData &throughput);
@@ -30,4 +30,4 @@ class AudioSimpleAlgorithm : public AdaptationAlgorithm {
 };
 
 }  // namespace ns3
-#endif /* AUDIO_SIMPLE_ALGORITHM_H */
+#endif /* AUDIO_FESTIVE_H */

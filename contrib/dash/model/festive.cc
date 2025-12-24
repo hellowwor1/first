@@ -34,7 +34,7 @@ FestiveAlgorithm::FestiveAlgorithm(const videoData &videoData,
           60000000),  //  [初始化] 设定目标缓冲区为 60秒 (30,000,000 微秒)
       m_delta(
           m_videoData.segmentDuration),  // [初始化] 波动范围设为一个切片的时长
-      m_alpha(1.0),
+      m_alpha(6.0),
       // 一开始是12 现在大幅减少
       // [初始化] 稳定性权重，数值越大，算法越不愿意切换码率
       m_highestRepIndex(videoData.averageBitrate.size() -
@@ -44,7 +44,7 @@ FestiveAlgorithm::FestiveAlgorithm(const videoData &videoData,
 // 现在激进一点，用估算带宽的95%
 {
   NS_LOG_INFO(this);
-  m_smooth.push_back(3);
+  m_smooth.push_back(5);
   // [参数] 必须在当前码率稳定坚持 5 个切片，才允许尝试升级
   // 激进一点，稳定3个
   m_smooth.push_back(
@@ -79,11 +79,11 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
                       (timeNow - m_throughput.transmissionEnd.back());
 
   // 缓冲区的缓冲数据有30s时，就请求下一个等级的码率
-  if (bufferNow >= 30000000 && bufferNow < m_targetBuf) {
-    answer.nextRepIndex++;
-    answer.decisionCase = 0;
-    return answer;
-  }
+  // if (bufferNow >= 30000000 && bufferNow < m_targetBuf) {
+  //   answer.nextRepIndex++;
+  //   answer.decisionCase = 0;
+  //   return answer;
+  // }
 
   // [冷启动保护] 如果历史传输记录少于 20 个，数据不足以做复杂计算，保持最低码率
   // v2 选择中等画质 同时激进一点，改为 3个
@@ -110,7 +110,7 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
     }
     // 只取最近 20 个样本
     // 激进一点取3个
-    if (thrptEstimationTmp.size() == 3) {
+    if (thrptEstimationTmp.size() == 20) {
       break;
     }
   }

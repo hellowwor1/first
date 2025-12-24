@@ -1,6 +1,6 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 
-#include "audio-simple-algorithm.h"
+#include "audio-festive.h"
 
 // #include "cstdio"
 #include "ns3/log.h"
@@ -8,15 +8,15 @@
 
 namespace ns3 {
 
-NS_LOG_COMPONENT_DEFINE("AudioSimpleAlgorithm");
+NS_LOG_COMPONENT_DEFINE("AudioFestiveAlgorithm");
 
-NS_OBJECT_ENSURE_REGISTERED(AudioSimpleAlgorithm);
+NS_OBJECT_ENSURE_REGISTERED(AudioFestiveAlgorithm);
 
 // --- 构造函数 ---
-AudioSimpleAlgorithm::AudioSimpleAlgorithm(const videoData& videoData,
-                                           const playbackData& playbackData,
-                                           const bufferData& bufferData,
-                                           const throughputData& throughput)
+AudioFestiveAlgorithm::AudioFestiveAlgorithm(const videoData& videoData,
+                                             const playbackData& playbackData,
+                                             const bufferData& bufferData,
+                                             const throughputData& throughput)
     : AdaptationAlgorithm(videoData, playbackData, bufferData, throughput),
       m_targetBuf(60000000),  // [修改点1] 目标缓冲设为 60秒
       // (视频通常30秒)。音频小，多存点。
@@ -27,8 +27,8 @@ AudioSimpleAlgorithm::AudioSimpleAlgorithm(const videoData& videoData,
   NS_LOG_INFO(this);
 }
 
-algorithmReply AudioSimpleAlgorithm::GetNextRep(const int64_t segmentCounter,
-                                                int64_t clientId) {
+algorithmReply AudioFestiveAlgorithm::GetNextRep(const int64_t segmentCounter,
+                                                 int64_t clientId) {
   int64_t timeNow = Simulator::Now().GetMicroSeconds();
   algorithmReply answer;
   answer.decisionTime = timeNow;
@@ -49,11 +49,11 @@ algorithmReply AudioSimpleAlgorithm::GetNextRep(const int64_t segmentCounter,
                       (timeNow - m_throughput.transmissionEnd.back());
 
   // 缓冲区的缓冲数据有30s时，就请求下一个等级的码率
-  if (bufferNow >= 30000000 && bufferNow < m_targetBuf) {
-    answer.nextRepIndex++;
-    answer.decisionCase = 0;
-    return answer;
-  }
+  // if (bufferNow >= 30000000 && bufferNow < m_targetBuf) {
+  //   answer.nextRepIndex++;
+  //   answer.decisionCase = 0;
+  //   return answer;
+  // }
 
   // [修改点3] 简单的休眠逻辑
   // 如果缓冲超过 60秒，就暂停下载，直到缓冲降到 60秒以下。
@@ -71,7 +71,7 @@ algorithmReply AudioSimpleAlgorithm::GetNextRep(const int64_t segmentCounter,
   // 如果样本太少，保持最低音质
   // v2 保持中等音质
   if (m_throughput.transmissionEnd.size() <
-      5)  // 音频切片小，5个样本大概就能看了
+      10)  // 音频切片小，5个样本大概就能看了
   {
     // answer.nextRepIndex = 0;
     answer.nextRepIndex = 3;
@@ -88,7 +88,7 @@ algorithmReply AudioSimpleAlgorithm::GetNextRep(const int64_t segmentCounter,
         ((double)((m_throughput.transmissionEnd.at(sd) -
                    m_throughput.transmissionRequested.at(sd)) /
                   1000000.0)));
-    if (thrptEstimationTmp.size() == 3) break;  // 音频取最近10个样本即可
+    if (thrptEstimationTmp.size() == 10) break;  // 音频取最近10个样本即可
   }
 
   double harmonicMeanDenominator = 0;
