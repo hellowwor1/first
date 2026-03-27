@@ -35,7 +35,6 @@
 #include "ns3/socket.h"
 #include "ns3/trace-source-accessor.h"
 #include "ns3/uinteger.h"
-
 // 声明使用ns3命名空间
 namespace ns3 {
 
@@ -60,8 +59,14 @@ void MultiTcpAvStreamClient::Controller_AV(controllerEvent event,
   NS_LOG_FUNCTION(this << ToStringControllerState(streamdata.state)
                        << ToStringControllerEvent(event)
                        << ToStringStreamType(type));  // 记录函数调用和事件
+  NS_LOG_INFO("当前时间: " << Simulator::Now().GetMicroSeconds() /
+                                  (double)1000000
+                           << "  " << ToStringControllerState(streamdata.state)
+                           << "  " << ToStringControllerEvent(event) << "  "
+                           << ToStringStreamType(type));  // 记录函数调用和事件
   // 初始状态处理
   if (streamdata.state == initial) {
+    NS_LOG_INFO("初始状态，发送第一个段请求");
     // 为流请求码率索引
     RequestRepIndex(&streamdata);  // 请求视频流码率索引
 
@@ -77,20 +82,27 @@ void MultiTcpAvStreamClient::Controller_AV(controllerEvent event,
   }
   // 下载状态处理
   if (streamdata.state == downloading) {
+    NS_LOG_INFO("下载状态");
     bool playRes = PlaybackHandleAV(streamdata);  // 尝试播放缓冲区中的段
     // 检查是否还有段需要播放
     if (streamdata.m_currentPlaybackIndex <= streamdata.m_lastSegmentIndex) {
       // 流的下载计数器加1
       streamdata.m_segmentCounter++;
+      streamdata.m_bufferData.m_segmentCounter++;
       // 为流请求下一段的码率索引
       RequestRepIndex(&streamdata);
       streamdata.state = downloadingPlaying;  // 切换到下载+播放状态
       // 发送流的下一段请求
+      NS_LOG_INFO("请求下一个片段: "
+                  << streamdata.m_segmentCounter
+                  << "  码率:  " << streamdata.m_currentRepIndex
+                  << " 总片段数:  " << streamdata.m_lastSegmentIndex);
       Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
                .at(streamdata.m_segmentCounter),
            &streamdata);
     } else {
       // 所有段都已下载，切换到播放状态
+      NS_LOG_INFO("所有段都已下载，切换到播放状态");
       streamdata.state = playing;
     }
     // 调度下一次播放完成事件
@@ -110,29 +122,32 @@ void MultiTcpAvStreamClient::Controller_AV(controllerEvent event,
   }
   // 如果当前状态是 downloadingPlaying（下载+播放）
   if (streamdata.state == downloadingPlaying) {
+    NS_LOG_INFO("下载+播放状态");
     if (event == downloadFinished) {  // 如果触发事件是下载完成
       if (streamdata.m_segmentCounter <
           streamdata.m_lastSegmentIndex) {  // 如果还有 segment 待下载
         streamdata.m_segmentCounter++;      // 下载计数器 +1
-        RequestRepIndex(&streamdata);       // 获取下一段码率索引
+        streamdata.m_bufferData.m_segmentCounter++;
+        RequestRepIndex(&streamdata);  // 获取下一段码率索引
       }
-      // 如果缓冲区状况很好，就停止一段时间下载，只播放
+      // 如果缓冲区状况良好，就停止一段时间下载
       if (streamdata.m_bDelay > 0 &&
           streamdata.m_segmentCounter <= streamdata.m_lastSegmentIndex) {
-        /*  e_dirs */  // 延迟下载事件标记
-        NS_LOG_INFO(this << "延迟下载事件发生" << streamdata.m_bDelay
-                         << ToStringControllerState(streamdata.state)
-                         << ToStringControllerEvent(event)
-                         << ToStringStreamType(type));  // 记录函数调用和事件
-        streamdata.state = playing;                     // 切换到播放状态
-        controllerEvent ev = irdFinished;  // 设置事件为延迟下载完成
+        NS_LOG_INFO("延迟下载事件发生,延迟:  "
+                    << streamdata.m_bDelay / (double)1000000 << "  当前时间: "
+                    << Simulator::Now().GetMicroSeconds() / (double)1000000
+                    << "  " << ToStringControllerState(streamdata.state) << "  "
+                    << ToStringControllerEvent(event) << "  "
+                    << ToStringStreamType(type));  // 记录函数调用和事件
+        streamdata.state = playing;                // 切换到播放状态
+        controllerEvent ev = irdFinished;          // 设置事件为延迟下载完成
+        streamdata.m_sbd.isSleeping = true;
         // 调度延迟事件触发
         Simulator::Schedule(MicroSeconds(streamdata.m_bDelay),
                             &MultiTcpAvStreamClient::Controller_AV, this, ev,
                             type);
       } else if (streamdata.m_segmentCounter ==
                  streamdata.m_lastSegmentIndex) {  // 如果当前下载最后一段
-        /*  e_df */                                // 下载完成标记
         streamdata.state = playing;                // 切换为播放状态
       } else {                                     // 如果还有 segment 待下载
         /*  e_d */                                 // 下载事件标记
@@ -161,7 +176,6 @@ void MultiTcpAvStreamClient::Controller_AV(controllerEvent event,
                               type);
         } else {
           // 确实是本流没有数据导致播放失败了，切换回下载状态，等待下载
-          /*  e_pu */                      // 播放空缓冲标记
           streamdata.state = downloading;  // 切换回只下载状态
         }
       }
@@ -170,17 +184,46 @@ void MultiTcpAvStreamClient::Controller_AV(controllerEvent event,
   }
   // 如果当前状态是 playing（只播放）
   if (streamdata.state == playing) {
-    if (event == irdFinished) {               // 如果延迟下载事件完成
-      /*  e_irc */                            // 延迟下载完成标记
-      streamdata.state = downloadingPlaying;  // 状态切换回下载+播放
+    NS_LOG_INFO("播放状态");
+    if (event == irdFinished) {  // 如果延迟下载事件完成
+      streamdata.m_sbd.isSleeping = false;
       // 发送当前段下载请求
-      Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
-               .at(streamdata.m_segmentCounter),
-           &streamdata);
+      NS_LOG_INFO("延迟下载请求结束,当前时间: "
+                  << Simulator::Now().GetMicroSeconds() / (double)1000000);
+      // 每次“延迟下载请求”结束后，都需要再判断一下是否还是需要再一次延迟
+      // 调用自适应算法,获取是否需要延迟下载以及延迟时间
+      algorithmReply answer =
+          streamdata.algo->GetNextRep(streamdata.m_segmentCounter, m_clientId);
+      streamdata.m_bDelay = answer.nextDownloadDelay;  // 更新延迟下载时间
+      NS_LOG_INFO("获取到的延迟下载时间: " << streamdata.m_bDelay /
+                                                  (double)1000000);
+      if (streamdata.m_bDelay > 0 &&
+          streamdata.m_segmentCounter < streamdata.m_lastSegmentIndex) {
+        NS_LOG_INFO("再次发生延迟下载事件,延迟:  "
+                    << streamdata.m_bDelay / (double)1000000 << "  当前时间: "
+                    << Simulator::Now().GetMicroSeconds() / (double)1000000
+                    << "  " << ToStringControllerState(streamdata.state) << "  "
+                    << ToStringControllerEvent(event) << "  "
+                    << ToStringStreamType(type));  // 记录函数调用和事件
+        streamdata.state = playing;                // 切换到播放状态
+        controllerEvent ev = irdFinished;          // 设置事件为延迟下载完成
+        streamdata.m_sbd.isSleeping = true;
+        // 调度延迟事件触发
+        Simulator::Schedule(MicroSeconds(streamdata.m_bDelay),
+                            &MultiTcpAvStreamClient::Controller_AV, this, ev,
+                            type);
+      } else {
+        // 没有延迟下载事件了
+        streamdata.state = downloadingPlaying;  // 状态切换回下载+播放
+        // 发送段请求
+        Send(streamdata.m_segmentData.segmentSize
+                 .at(streamdata.m_currentRepIndex)
+                 .at(streamdata.m_segmentCounter),
+             &streamdata);
+      }
     } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex <
                                                 streamdata.m_lastSegmentIndex) {
       // 如果播放完成，且还有 segment 没有播放完
-      /*  e_pb */                                   // 播放完成标记
       bool playRes = PlaybackHandleAV(streamdata);  // 播放缓冲区中的 segment
       if (!playRes) {
         controllerEvent ev = playbackFinished;  // 生成播放完成事件
@@ -189,8 +232,14 @@ void MultiTcpAvStreamClient::Controller_AV(controllerEvent event,
                             &MultiTcpAvStreamClient::Controller_AV, this, ev,
                             type);
       } else {
+        // 因为对方流没有准备好,无法播放 等100ms再试试
+        if (streamdata.m_segmentsInBuffer > 0) {
+          controllerEvent ev = playbackFinished;
+          Simulator::Schedule(MicroSeconds(100000),
+                              &MultiTcpAvStreamClient::Controller_AV, this, ev,
+                              type);
+        }
       }
-
     } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex ==
                                                 streamdata.m_lastSegmentIndex) {
       // 如果播放完成，且已经是最后的segment
@@ -202,138 +251,13 @@ void MultiTcpAvStreamClient::Controller_AV(controllerEvent event,
     return;  // 结束本次 Controller 调用
   }
 }
-void MultiTcpAvStreamClient::Controller(controllerEvent event,
-                                        StreamType type) {
-  StreamData& streamdata =
-      (type == VIDEO_STREAM ? m_videoStream : m_audioStream);
-  NS_LOG_FUNCTION(this << ToStringControllerState(streamdata.state)
-                       << ToStringControllerEvent(event)
-                       << ToStringStreamType(type));  // 记录函数调用和事件
-  // 初始状态处理
-  if (streamdata.state == initial) {
-    // 为流请求码率索引
-    RequestRepIndex(&streamdata);  // 请求视频流码率索引
-
-    // 发送流的下载请求
-    // 发送段请求
-    Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
-             .at(streamdata.m_segmentCounter),
-         &streamdata);
-
-    streamdata.state = downloading;  // 切换到下载状态
-
-    return;
-  }
-  // 下载状态处理
-  if (streamdata.state == downloading) {
-    PlaybackHandleSingle(streamdata);  // 尝试播放缓冲区中的段
-    // 检查是否还有段需要播放
-    if (streamdata.m_currentPlaybackIndex <= streamdata.m_lastSegmentIndex) {
-      // 流的下载计数器加1
-      streamdata.m_segmentCounter++;
-      // 为流请求下一段的码率索引
-      RequestRepIndex(&streamdata);
-      streamdata.state = downloadingPlaying;  // 切换到下载+播放状态
-      // 发送流的下一段请求
-      Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
-               .at(streamdata.m_segmentCounter),
-           &streamdata);
-    } else {
-      // 所有段都已下载，切换到播放状态
-      streamdata.state = playing;
-    }
-    // 调度下一次播放完成事件
-    controllerEvent ev = playbackFinished;
-    Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
-                        &MultiTcpAvStreamClient::Controller, this, ev, type);
-    return;
-  }
-  // 如果当前状态是 downloadingPlaying（下载+播放）
-  if (streamdata.state == downloadingPlaying) {
-    if (event == downloadFinished) {  // 如果触发事件是下载完成
-      if (streamdata.m_segmentCounter <
-          streamdata.m_lastSegmentIndex) {  // 如果还有 segment 待下载
-        streamdata.m_segmentCounter++;      // 下载计数器 +1
-        RequestRepIndex(&streamdata);       // 获取下一段码率索引
-      }
-      // 如果缓冲区状况很好，就停止一段时间下载，只播放
-      if (streamdata.m_bDelay > 0 &&
-          streamdata.m_segmentCounter <= streamdata.m_lastSegmentIndex) {
-        /*  e_dirs */  // 延迟下载事件标记
-        NS_LOG_INFO(this << "延迟下载事件发生" << streamdata.m_bDelay
-                         << ToStringControllerState(streamdata.state)
-                         << ToStringControllerEvent(event)
-                         << ToStringStreamType(type));  // 记录函数调用和事件
-        streamdata.state = playing;                     // 切换到播放状态
-        controllerEvent ev = irdFinished;  // 设置事件为延迟下载完成
-        // 调度延迟事件触发
-        Simulator::Schedule(MicroSeconds(streamdata.m_bDelay),
-                            &MultiTcpAvStreamClient::Controller, this, ev,
-                            type);
-      } else if (streamdata.m_segmentCounter ==
-                 streamdata.m_lastSegmentIndex) {  // 如果当前下载最后一段
-        /*  e_df */                                // 下载完成标记
-        streamdata.state = playing;                // 切换为播放状态
-      } else {                                     // 如果还有 segment 待下载
-        /*  e_d */                                 // 下载事件标记
-        // 发送下一段下载请求
-        Send(streamdata.m_segmentData.segmentSize
-                 .at(streamdata.m_currentRepIndex)
-                 .at(streamdata.m_segmentCounter),
-             &streamdata);
-      }
-    } else if (event == playbackFinished) {     // 如果触发事件是播放完成
-      if (!PlaybackHandleSingle(streamdata)) {  // 尝试播放下一段，如果返回
-                                                // false 表示缓冲中还有segment
-        /*  e_pb */                             // 播放缓冲标记
-        controllerEvent ev = playbackFinished;  // 设置播放完成事件
-        // 调度下一次播放完成事件
-        Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
-                            &MultiTcpAvStreamClient::Controller, this, ev,
-                            type);
-      } else {                           // 缓冲为空，无法播放
-        /*  e_pu */                      // 播放空缓冲标记
-        streamdata.state = downloading;  // 切换回只下载状态
-      }
-    }
-    return;  // 结束本次 Controller 调用
-  }
-  // 如果当前状态是 playing（只播放）
-  if (streamdata.state == playing) {
-    if (event == irdFinished) {               // 如果延迟下载事件完成
-      /*  e_irc */                            // 延迟下载完成标记
-      streamdata.state = downloadingPlaying;  // 状态切换回下载+播放
-      // 发送当前段下载请求
-      Send(streamdata.m_segmentData.segmentSize.at(streamdata.m_currentRepIndex)
-               .at(streamdata.m_segmentCounter),
-           &streamdata);
-    } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex <
-                                                streamdata.m_lastSegmentIndex) {
-      // 如果播放完成，且还有 segment 没有播放完
-      /*  e_pb */                             // 播放完成标记
-      PlaybackHandleSingle(streamdata);       // 播放缓冲区中的 segment
-      controllerEvent ev = playbackFinished;  // 生成播放完成事件
-      // 调度下一次播放完成事件
-      Simulator::Schedule(MicroSeconds(streamdata.m_segmentDuration),
-                          &MultiTcpAvStreamClient::Controller, this, ev, type);
-    } else if (event == playbackFinished && streamdata.m_currentPlaybackIndex ==
-                                                streamdata.m_lastSegmentIndex) {
-      // 如果播放完成，且已经是最后的segment
-      PlaybackHandleSingle(streamdata);  // 播放最后一段
-      /*  e_pf */                        // 播放完成标记
-      streamdata.state = terminal;       // 状态切换为终止
-      StopApplication();                 // 停止客户端应用
-    }
-    return;  // 结束本次 Controller 调用
-  }
-}
 
 std::string MultiTcpAvStreamClient::ToStringStreamType(StreamType type) {
   switch (type) {
     case VIDEO_STREAM:
-      return "video_stream";
+      return "视频流";
     case AUDIO_STREAM:
-      return "audio_stream";
+      return "音频流";
     default:
       return "";
   }
@@ -468,7 +392,40 @@ TypeId MultiTcpAvStreamClient::GetTypeId(void) {
           .AddAttribute(
               "ClientId", "The ID of this client", UintegerValue(0),
               MakeUintegerAccessor(&MultiTcpAvStreamClient::m_clientId),
-              MakeUintegerChecker<uint32_t>());
+              MakeUintegerChecker<uint32_t>())
+
+          // 添加采样Rtt的采样周期，默认100ms
+          .AddAttribute(
+              "RttSampleInterval",
+              "RTT sampling interval for shared bottleneck detection",
+              TimeValue(MilliSeconds(100)),
+              MakeTimeAccessor(&MultiTcpAvStreamClient::m_RttSampleInterval),
+              MakeTimeChecker())
+
+          // 添加采样最大窗口，默认500个，也就是最近50s的RTT数据
+          .AddAttribute(
+              "MaxRttSamples", "Maximum number of RTT samples kept per stream",
+              UintegerValue(500),
+              MakeUintegerAccessor(&MultiTcpAvStreamClient::m_maxRttSamples),
+              MakeUintegerChecker<uint32_t>())
+
+          // 开启共享瓶颈感知的ABR算法设计
+          .AddAttribute(
+              "EnableSharedBottleneckAwareAbr",
+              "Enable ABR adaptation that is aware of shared bottlenecks "
+              "between flows",
+              BooleanValue(false),
+              MakeBooleanAccessor(
+                  &MultiTcpAvStreamClient::m_enableSharedBottleneckAwareAbr),
+              MakeBooleanChecker())
+
+          // 开启 MPTCP-SBD（INFOCOM 2016） 算法支持
+          .AddAttribute(
+              "EnableMptcpSbd", "Enable MPTCP-SBD algorithm support",
+              BooleanValue(false),
+              MakeBooleanAccessor(&MultiTcpAvStreamClient::m_enableMptcpSbd),
+              MakeBooleanChecker());
+
   return tid;
 }
 
@@ -497,8 +454,11 @@ MultiTcpAvStreamClient::MultiTcpAvStreamClient() {
   m_videoStream.state = initial;
   m_videoStream.m_SegmentReceived = false;
   m_videoStream.m_bDelay = 0;
+  m_videoStream.m_LatestRtt = MilliSeconds(0);
+  m_videoStream.m_bufferData.qoe =
+      &qoe;  // 将视频流的 QoE 引用指向客户端的 QoE 变量
+  m_videoStream.m_bufferData.isAudio = false;  // 视频流的 isAudio 标记为 false
 
-  // 初始化音频流数据
   m_audioStream.m_socket = 0;
   m_audioStream.algo = NULL;
   m_audioStream.m_currentRepIndex = 0;
@@ -511,6 +471,13 @@ MultiTcpAvStreamClient::MultiTcpAvStreamClient() {
   m_audioStream.state = initial;
   m_audioStream.m_SegmentReceived = false;
   m_audioStream.m_bDelay = 0;
+  m_audioStream.m_LatestRtt = MilliSeconds(0);
+  m_audioStream.m_bufferData.qoe =
+      &qoe;  // 将音频流的 QoE 引用指向客户端的 QoE 变量
+  m_audioStream.m_bufferData.isAudio = true;  // 音频流的 isAudio 标记为 true
+
+  // 可动态调整
+  // m_rttSampleInterval = MilliSeconds(100);  // 默认 100ms
 }
 
 // 初始化客户端
@@ -519,9 +486,12 @@ void MultiTcpAvStreamClient::Initialise(std::string video_algorithm,
                                         uint16_t clientId) {
   NS_LOG_FUNCTION(this << video_algorithm << audio_algorithm << clientId);
 
+  NS_LOG_INFO("m_segmentationDuration: " << m_segmentDuration);
   // 设置视频流段持续时间, 音频使用相同的段持续时间
   m_videoStream.m_segmentDuration = m_segmentDuration;
+  m_videoStream.m_bufferData.m_segmentDuration = m_segmentDuration;
   m_audioStream.m_segmentDuration = m_segmentDuration;
+  m_audioStream.m_bufferData.m_segmentDuration = m_segmentDuration;
 
   if (m_streamSelection == VIDEO_ONLY || m_streamSelection == AUDIO_VIDEO) {
     // 读取视频段大小文件
@@ -554,6 +524,17 @@ void MultiTcpAvStreamClient::Initialise(std::string video_algorithm,
       m_videoStream.algo = new BbaAlgorithm(
           m_videoStream.m_segmentData, m_videoStream.m_playbackData,
           m_videoStream.m_bufferData, m_videoStream.m_throughput);
+    } else if (video_algorithm == "sabba") {
+      m_videoStream.algo = new SabbaAlgorithm(
+          m_videoStream.m_segmentData, m_videoStream.m_playbackData,
+          m_videoStream.m_bufferData, m_audioStream.m_bufferData,
+          m_videoStream.m_throughput, m_audioStream.m_throughput);
+    } else if (video_algorithm == "abr") {
+      m_videoStream.algo = new AbrAlgorithm(
+          m_videoStream.m_segmentData, m_audioStream.m_segmentData,
+          m_videoStream.m_playbackData, m_audioStream.m_playbackData,
+          m_videoStream.m_bufferData, m_audioStream.m_bufferData,
+          m_videoStream.m_throughput, m_audioStream.m_throughput);
     } else {
       NS_LOG_ERROR("Invalid video_algorithm name entered. Terminating.");
       StopApplication();
@@ -582,13 +563,24 @@ void MultiTcpAvStreamClient::Initialise(std::string video_algorithm,
 
     // 为音频流创建自适应算法对象
     if (audio_algorithm == "festive") {
-      m_audioStream.algo = new AudioFestiveAlgorithm(
+      m_audioStream.algo = new FestiveAlgorithm(
           m_audioStream.m_segmentData, m_audioStream.m_playbackData,
           m_audioStream.m_bufferData, m_audioStream.m_throughput);
     } else if (audio_algorithm == "bba") {
       m_audioStream.algo = new BbaAlgorithm(
           m_audioStream.m_segmentData, m_audioStream.m_playbackData,
           m_audioStream.m_bufferData, m_audioStream.m_throughput);
+    } else if (audio_algorithm == "sabba") {
+      m_audioStream.algo = new SabbaAlgorithm(
+          m_audioStream.m_segmentData, m_audioStream.m_playbackData,
+          m_audioStream.m_bufferData, m_videoStream.m_bufferData,
+          m_audioStream.m_throughput, m_videoStream.m_throughput);
+    } else if (audio_algorithm == "abr") {
+      m_audioStream.algo = new AbrAlgorithm(
+          m_audioStream.m_segmentData, m_videoStream.m_segmentData,
+          m_audioStream.m_playbackData, m_videoStream.m_playbackData,
+          m_audioStream.m_bufferData, m_videoStream.m_bufferData,
+          m_audioStream.m_throughput, m_videoStream.m_throughput);
     } else {
       NS_LOG_ERROR("Invalid audio_algorithm name entered. Terminating.");
       StopApplication();
@@ -633,19 +625,156 @@ void MultiTcpAvStreamClient::RequestRepIndex(StreamData* streamData) {
   // 调用自适应算法`
   answer =
       streamData->algo->GetNextRep(streamData->m_segmentCounter, m_clientId);
+  NS_LOG_INFO("请求码率索引: " << answer.nextRepIndex << "  延迟下载时间: "
+                               << answer.nextDownloadDelay / (double)1000000);
+  streamData->m_bDelay = answer.nextDownloadDelay;
   streamData->m_currentRepIndex = answer.nextRepIndex;  // 更新当前码率索引
-
-  // 确保码率索引不超过最大值
-  NS_ASSERT_MSG(answer.nextRepIndex <= streamData->m_highestRepIndex,
-                "Algorithm returned representation index higher than maximum");
-
   // 保存播放序列中的码率索引，用于后续的日志记录
   streamData->m_playbackData.playbackIndex.push_back(answer.nextRepIndex);
-  // 更新播放延迟
-  // m_bDelay = std::max(m_bDelay, answer.nextDownloadDelay);
-  streamData->m_bDelay = answer.nextDownloadDelay;
   // 记录自适应算法决策
   LogAdaptation(answer, streamData);
+}
+void MultiTcpAvStreamClient::DumpOwdWindows(const StreamData& stream,
+                                            int64_t timeNow) const {
+  std::string streamName =
+      stream.m_type == VIDEO_STREAM ? "Video Stream" : "Audio Stream";
+  NS_LOG_INFO("========== " << streamName << "==========");
+  NS_LOG_INFO("========== OWD Sliding Window Dump ==========");
+  NS_LOG_INFO("Now time          : " << timeNow << " ms");
+  NS_LOG_INFO("CurrentWindowEnd  : " << stream.m_sbd.m_NowWindowEnd << " ms");
+  NS_LOG_INFO("Window count      : " << stream.m_sbd.m_Owds.size());
+  NS_LOG_INFO("PB                : " << stream.m_sbd.GetPB());
+  NS_LOG_INFO("MeanSkew          : " << stream.m_sbd.GetMeanSkew());
+  NS_LOG_INFO("MeanVar           : " << stream.m_sbd.GetMeanVar());
+  NS_LOG_INFO("MeanFreq          : " << stream.m_sbd.GetMeanFreq());
+  NS_LOG_INFO(
+      "GrowthSimilarity_1: " << stream.m_sbd.GetGrowthSimilarity().first);
+  NS_LOG_INFO(
+      "GrowthSimilarity_2: " << stream.m_sbd.GetGrowthSimilarity().second);
+  size_t idx = 0;
+  for (const auto& w : stream.m_sbd.m_Owds) {
+    int64_t window_end = w.m_NowWindowEnd;
+    int64_t window_start = window_end - WINDOW_MS;
+    size_t sample_cnt = w.owds.size();
+
+    int64_t min_owd = 0;
+    int64_t max_owd = 0;
+    double mean_owd = 0.0;
+
+    if (!w.owds.empty()) {
+      min_owd = w.owds[0];
+      max_owd = w.owds[0];
+      int64_t sum = 0;
+
+      for (auto owd : w.owds) {
+        sum += owd;
+        if (owd < min_owd) min_owd = owd;
+        if (owd > max_owd) max_owd = owd;
+      }
+      mean_owd = static_cast<double>(sum) / w.owds.size();
+    }
+
+    NS_LOG_INFO("  [" << idx << "] "
+                      << "Window [" << window_start << ", " << window_end
+                      << ") ms"
+                      << ", samples = " << sample_cnt << ", min = " << min_owd
+                      << ", max = " << max_owd << ", mean = " << mean_owd
+                      << ", gap: " << w.gap);
+
+    ++idx;
+  }
+
+  NS_LOG_INFO("=============================================");
+}
+
+void MultiTcpAvStreamClient::AddOwdSample(StreamData& stream, int64_t timeNow,
+                                          int64_t owd) {
+  // 1. 初始化（第一次调用）
+  if (stream.m_sbd.m_NowWindowEnd == 0) {
+    stream.m_sbd.m_NowWindowEnd = ((timeNow / WINDOW_MS) + 1) * WINDOW_MS;
+
+    stream.m_sbd.m_Owds.emplace_back(
+        OwdInfo{std::vector<int64_t>{}, stream.m_sbd.m_NowWindowEnd, 0.0});
+  }
+  bool advanced = false;
+  // 2. 推进窗口（处理时间跳跃）
+  // 如果当前时间不在窗口内，说明是新窗口，在m_Owds末尾添加一个新的vector
+  while (timeNow >= stream.m_sbd.m_NowWindowEnd) {
+    // 有窗口变更，打印信息
+    advanced = true;
+
+    // 窗口刚刚结束，还没推进
+    if (!stream.m_sbd.m_Owds.empty()) {
+      const OwdInfo& lastWindow = stream.m_sbd.m_Owds.back();
+      LogOwdWindow(stream, lastWindow);
+    }
+    /*
+      当前流不处于睡眠状态，并且当前窗口内没有OWD样本
+      说明这个窗口是完全没有信息的，网络状态太差导致端侧长时间接收不到数据包
+      如果这个窗口不是第一个窗口，那么就复制前一个窗口OWD信息，并且每一个owd都加上一个WINDOW_MS
+      如果是第一个窗口就不管
+    */
+    // if (!stream.m_sbd.isSleeping && stream.m_sbd.m_Owds.back().owds.empty())
+    // {
+    //   // 至少需要两个窗口（当前 + 前一个）
+    //   if (stream.m_sbd.m_Owds.size() >= 2) {
+    //     auto& curr = stream.m_sbd.m_Owds.back();
+    //     const auto& prev = stream.m_sbd.m_Owds[stream.m_sbd.m_Owds.size() -
+    //     2];
+    //     // 复制前一个窗口 OWD
+    //     curr.owds = prev.owds;
+    //     // 每个 OWD 增加 WINDOW_MS
+    //     for (auto& owd : curr.owds) {
+    //       owd += WINDOW_MS;
+    //     }
+    //   }
+    // }
+    // 计算当前彻底不会有新信息进入的窗口内的统计信息,也就是计算当前最后一个窗口的统计信息
+
+    stream.m_sbd.AddMeanOwd();
+
+    /*
+     更新streamData->m_NowWindowEnd，将m_NowWindowEnd以350ms为步长前进，前进到要超过timeNow的最小值
+    */
+    stream.m_sbd.m_NowWindowEnd += WINDOW_MS;
+    stream.m_sbd.m_Owds.emplace_back(
+        OwdInfo{std::vector<int64_t>{}, stream.m_sbd.m_NowWindowEnd, 0.0});
+
+    // 3. 清理过期窗口（超过 17.5s）
+    /*
+    在每次要新添加一个vector之前，先判断最旧的vector是否已经超时了，
+    一个vector存储350ms的数据，一共保存50个vector，也就是存储17.5s的数据
+    逻辑就是判断即将要新添加的这个vector的时间点，是否已经超过了最旧的vector的时间17.5s，循环把这些超出的vector删除掉
+
+    或者换一个逻辑，一共保存50个vector，如果超过了50个，就删除头部的vector.
+    */
+    // while (!stream.m_sbd.m_Owds.empty()) {
+    //   int64_t newest_end = stream.m_sbd.m_NowWindowEnd;
+    //   int64_t oldest_end = stream.m_sbd.m_Owds.front().m_NowWindowEnd;
+
+    //   if (newest_end - oldest_end > MAX_RANGE_MS) {
+    //     stream.m_sbd.DeleteMeanOwd();
+    //     stream.m_sbd.m_Owds.pop_front();
+    //   } else {
+    //     break;
+    //   }
+    // }
+    while (stream.m_sbd.m_Owds.size() > MAX_WINDOWS) {
+      stream.m_sbd.DeleteMeanOwd();
+      stream.m_sbd.m_Owds.pop_front();
+    }
+  }
+
+  // 4. 插入当前 OWD 到最后一个窗口
+  /*
+    如果当前时间在窗口内，说明是同一个窗口，直接把owd添加到m_Owds最后一个vector中
+    如果没有vector就需要添加
+  */
+  stream.m_sbd.m_Owds.back().owds.push_back(owd);
+
+  if (advanced) {
+    // DumpOwdWindows(stream, timeNow);
+  }
 }
 
 // 指定流发送数据包到服务器
@@ -668,7 +797,7 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
   // 获取套接字对应的流类型
   StreamType streamType = GetStreamTypeFromSocket(socket);
   StreamData* streamData = GetStreamData(streamType);
-
+  std::string s1 = " " + std::to_string(streamData->m_segmentCounter) + " ";
   if (streamData == NULL) {
     NS_LOG_WARN("Received data from unknown socket");
     return;
@@ -681,7 +810,6 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
     streamData->m_transmissionStartReceivingSegment =
         Simulator::Now().GetMicroSeconds();
 
-    std::string s1 = " " + std::to_string(streamData->m_segmentCounter) + " ";
     NS_LOG_DEBUG(ToStringStreamType(streamType)
                  << s1 << " segment start received(s) : "
                  << streamData->m_transmissionStartReceivingSegment /
@@ -692,6 +820,15 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
 
   // 循环接收所有可用数据包
   while ((packet = socket->Recv())) {
+    // 读取包上的 FlowTag
+    // FlowTag tag;
+    // if (packet->FindFirstMatchingByteTag(tag)) {
+    //   // 处理 FlowTag
+    //   Time sendTime = tag.GetTxTime();
+    //   int64_t owd = (Simulator::Now() - sendTime).GetMilliSeconds();
+    //   AddOwdSample(*streamData, Simulator::Now().GetMilliSeconds(), owd);
+    // }
+
     packetSize = packet->GetSize();  // 获取当前数据包大小（字节数）
     // 记录吞吐量日志
     LogThroughput(packetSize, streamType);
@@ -702,17 +839,41 @@ void MultiTcpAvStreamClient::HandleRead(Ptr<Socket> socket) {
         streamData->m_segmentData.segmentSize.at(streamData->m_currentRepIndex)
             .at(streamData->m_segmentCounter);
     // 检查是否已接收完整段
+    // NS_LOG_INFO(ToStringStreamType(streamData->m_type)
+    //             << s1 << "段接收情况： " << streamData->m_bytesReceived <<
+    //             "/"
+    //             << expectedSize << " bytes");
+
     if (streamData->m_bytesReceived == expectedSize) {
-      std::string s1 = " " + std::to_string(streamData->m_segmentCounter) + " ";
       NS_LOG_DEBUG(ToStringStreamType(streamData->m_type)
                    << s1 << " segment received completely: "
                    << streamData->m_bytesReceived << "/" << expectedSize
                    << " bytes");
       // 更新段接收状态
       streamData->m_SegmentReceived = true;
-
       // 处理段接收完成
       SegmentReceivedHandle(streamType);
+
+      // 更新QoE
+      if (qoe_R[streamData->m_segmentCounter] != 0) {
+        NS_LOG_INFO("Updating QoE for segment "
+                    << streamData->m_segmentCounter << ": expected size = "
+                    << expectedSize / 1000000.0 << " MB, other R = "
+                    << qoe_R[streamData->m_segmentCounter] / 1000000.0
+                    << " MB");
+        qoe_Ds += std::abs(expectedSize - qoe_R[streamData->m_segmentCounter]) /
+                  1000000.0;  // 以MB为单位累加质量损失
+        qoe_R[streamData->m_segmentCounter] +=
+            expectedSize / 1000000.0;  // 以MB为单位累加码率
+        qoe_Rs += qoe_R[streamData->m_segmentCounter];
+        qoe = (qoe_Rs - qoe_alpha * qoe_Ts - qoe_beta * qoe_Ds);
+        NS_LOG_INFO("QoE updated: " << qoe << " (R: " << qoe_Rs
+                                    << " Mbps, T: " << qoe_Ts
+                                    << " s, D: " << qoe_Ds << " Mbps)");
+      } else {
+        qoe_R[streamData->m_segmentCounter] =
+            expectedSize / 1000000.0;  // 以MB为单位记录码率
+      }
     }
   }
 }
@@ -747,6 +908,13 @@ MultiTcpAvStreamClient::GetStreamData(StreamType streamType) {
     return NULL;
   }
 }
+MultiTcpAvStreamClient::StreamData*
+MultiTcpAvStreamClient::GetOtherStreamData(StreamType streamType) {
+  if (streamType == VIDEO_STREAM)
+    return &m_audioStream;
+  else
+    return &m_videoStream;
+}
 
 // 处理段接收完成
 void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
@@ -756,10 +924,11 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
   if (streamData == NULL) return;
 
   // 记录当前时间作为接收完成时间
-  streamData->m_transmissionEndReceivingSegment =
-      Simulator::Now().GetMicroSeconds();
-
-  // 将接收完成时间存入缓冲时间记录数组
+  int64_t timeNow = Simulator::Now().GetMicroSeconds();
+  streamData->m_transmissionEndReceivingSegment = timeNow;
+  NS_LOG_INFO("当前时间： "
+              << streamData->m_transmissionEndReceivingSegment / 1e6);
+  // 将接收完成时间存入缓冲时间记录数 组
   streamData->m_bufferData.timeNow.push_back(
       streamData->m_transmissionEndReceivingSegment);
 
@@ -785,9 +954,13 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
     //              (int64_t)0));
     streamData->m_bufferData.bufferLevelOld.push_back(
         streamData->m_segmentsInBuffer * streamData->m_segmentDuration);
+    NS_LOG_INFO(ToStringStreamType(streamType) + "旧 缓冲区: "
+                << streamData->m_bufferData.bufferLevelOld.back());
   } else {
     // 第一段，旧缓冲量为0
     streamData->m_bufferData.bufferLevelOld.push_back(0);
+    NS_LOG_INFO(ToStringStreamType(streamType) + "旧 缓冲区: "
+                << streamData->m_bufferData.bufferLevelOld.back());
   }
 
   // 计算新缓冲量 = 旧缓冲量+新接受的段持续时间
@@ -796,7 +969,8 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
   //     streamData->m_segmentDuration);
   streamData->m_bufferData.bufferLevelNew.push_back(
       (streamData->m_segmentsInBuffer + 1) * streamData->m_segmentDuration);
-
+  NS_LOG_INFO(ToStringStreamType(streamType) + "新 缓冲区: "
+              << streamData->m_bufferData.bufferLevelNew.back());
   // 记录吞吐量相关信息
   streamData->m_throughput.bytesReceived.push_back(
       streamData->m_segmentData.segmentSize.at(streamData->m_currentRepIndex)
@@ -812,18 +986,34 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
   LogDownload(streamType);
 
   // 写入缓冲日志
-  LogBuffer(streamType);
+  // LogBuffer(streamType);
 
   // 重置已接收字节数
   streamData->m_bytesReceived = 0;
   streamData->m_SegmentReceived = false;
   streamData->m_ptsQueue.push((streamData->m_segmentCounter + 1) *
-                              streamData->m_segmentDuration);
+                              streamData->m_segmentDuration / 1e6);
   std::string streamName = streamData->m_type == 0 ? "视频流 " : "音频流 ";
   NS_LOG_INFO(streamName << " 的 pts队列数据 "
                          << streamData->m_ptsQueue.back());
   // 缓冲区里面的段数加1
   streamData->m_segmentsInBuffer++;
+  streamData->m_bufferData.m_segmentsInBuffer++;
+
+  // 记录缓冲区里面的每一块的大小
+  streamData->m_bufferData.segmentSizes.push_back(
+      streamData->m_segmentData.segmentSize.at(streamData->m_currentRepIndex)
+          .at(streamData->m_segmentCounter));  // 本段大小
+
+  int64_t bufferMs =
+      streamData->m_bufferData.m_segmentsInBuffer *
+      (streamData->m_segmentDuration / 1000);  // 当前缓冲区水平（毫秒）
+  int64_t nowMs = Simulator::Now().GetMilliSeconds();
+
+  UpdateBufferState(nowMs, bufferMs, streamData->m_bufferTrendState);
+
+  // 写入缓冲日志
+  LogBuffer_v2(streamType, timeNow);
 
   if (streamData->m_segmentCounter == streamData->m_lastSegmentIndex) {
     streamData->m_bDelay = 0;
@@ -833,6 +1023,57 @@ void MultiTcpAvStreamClient::SegmentReceivedHandle(StreamType streamType) {
   controllerEvent event = downloadFinished;
   // Controller(event, streamType);
   Controller_AV(event, streamType);
+}
+
+// 在网络拓扑脚本处有新Owd到来时，实时更新
+void MultiTcpAvStreamClient::NotifyOwd(bool isVideo, int64_t rxTime,
+                                       int64_t owd) {
+  // NS_LOG_INFO("应用程序准备更新Owd: " << isVideo << ":  " << owd << "  at  "
+  //                                     << rxTime);
+  if (isVideo) {
+    AddOwdSample(m_videoStream, rxTime, owd);
+  } else {
+    AddOwdSample(m_audioStream, rxTime, owd);
+  }
+}
+
+// 接收ECN标志函数
+void MultiTcpAvStreamClient::NotifyEcn(Ipv4Address srcIp, uint16_t srcPort,
+                                       Time rxTime) {
+  EcnEvent ev;
+  ev.srcIp = srcIp;
+  ev.srcPort = srcPort;
+  ev.rxTime = rxTime;
+
+  m_ecnEvents.push_back(ev);
+
+  NS_LOG_INFO("应用程序接收到了 ECN 标志: " << srcIp << ":" << srcPort << "at "
+                                            << rxTime.GetSeconds());
+  m_sbCc.OnCeEvent(srcIp, srcPort, rxTime);
+
+  if (m_sbCc.IsSharedBottleneck()) {
+    NS_LOG_UNCOND("[APP] Audio/Video shared bottleneck detected at "
+                  << rxTime.GetSeconds() << "s");
+    if (preTimeLog_sbcc != (int)Simulator::Now().GetSeconds()) {
+      preTimeLog_sbcc = (int)Simulator::Now().GetSeconds();
+      m_SbCcLog << (int)Simulator::Now().GetSeconds() << "    " << "1"
+                << "\n";
+      m_SbCcLog.flush();
+    }
+  }
+}
+
+// trace函数只更新每次rtt状态
+void MultiTcpAvStreamClient::VideoRttTrace(Time oldRtt, Time newRtt) {
+  m_videoStream.m_LatestRtt = newRtt;
+  int64_t timeNow = Simulator::Now().GetMicroSeconds() / (double)1000000;
+  NS_LOG_INFO("[RTT]: " << newRtt.GetMilliSeconds() << "   time:" << timeNow);
+}
+//  trace函数只更新每次rtt状态
+void MultiTcpAvStreamClient::AudioRttTrace(Time oldRtt, Time newRtt) {
+  m_audioStream.m_LatestRtt = newRtt;
+  int64_t timeNow = Simulator::Now().GetMicroSeconds() / (double)1000000;
+  NS_LOG_INFO("[RTT]: " << newRtt.GetMilliSeconds() << "   time:" << timeNow);
 }
 
 // 读取段大小文件
@@ -852,8 +1093,8 @@ int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile,
   StreamData* streamData =
       isVideo ? &m_videoStream : &m_audioStream;  // 获取对应的流数据
 
-  std::string temp;                 // 临时保存每行文本
-  int64_t averageByteSizeTemp = 0;  // 临时保存平均字节数
+  std::string temp;  // 临时保存每行文本
+  // int64_t averageByteSizeTemp = 0;  // 临时保存平均字节数
 
   // 清空现有数据
   streamData->m_segmentData.segmentSize.clear();
@@ -874,13 +1115,24 @@ int MultiTcpAvStreamClient::ReadInBitrateValues(std::string segmentSizeFile,
     streamData->m_segmentData.segmentSize.push_back(line);
 
     // 计算平均字节数
-    averageByteSizeTemp =
-        (int64_t)std::accumulate(line.begin(), line.end(), 0.0) / line.size();
+    // averageByteSizeTemp =
+    //     (int64_t)std::accumulate(line.begin(), line.end(), 0.0) /
+    //     line.size();
 
-    // 计算并保存平均比特率（bit/s）
-    streamData->m_segmentData.averageBitrate.push_back(
-        (8.0 * averageByteSizeTemp) /
-        (streamData->m_segmentDuration / 1000000.0));
+    // // 计算并保存平均比特率（bit/s）
+    // streamData->m_segmentData.averageBitrate.push_back(
+    //     (8.0 * averageByteSizeTemp) /
+    //     (streamData->m_segmentDuration / 1000000.0));
+    double totalBytes = std::accumulate(line.begin(), line.end(), 0.0);
+    double totalDuration =
+        line.size() * (streamData->m_segmentDuration / 1000000.0);
+
+    double avgBitrate = 0.0;
+    if (!line.empty() && totalDuration > 0.0) {
+      avgBitrate = totalBytes * 8.0 / totalDuration;
+    }
+
+    streamData->m_segmentData.averageBitrate.push_back(avgBitrate);
   }
   // 将块的平均比特率输出到日志中
   for (double i : streamData->m_segmentData.averageBitrate) {
@@ -935,8 +1187,18 @@ bool MultiTcpAvStreamClient::PlaybackHandleSingle(StreamData& stream) {
                    << timeNow / (double)1000000);  // 日志宏
     // 将当前播放段开始时间存入播放日志
     stream.m_playbackData.playbackStart.push_back(timeNow);
-    LogPlayback(stream.m_type);       // 写入播放日志
-    stream.m_segmentsInBuffer--;      // 缓冲区中段数减少
+    LogPlayback(stream.m_type);   // 写入播放日志
+    stream.m_segmentsInBuffer--;  // 缓冲区中段数减少
+    stream.m_bufferData.m_segmentsInBuffer--;
+
+    stream.m_bufferData.segmentSizes.pop_front();  // 移除已播放段的大小记录
+
+    int64_t bufferMs =
+        stream.m_bufferData.m_segmentsInBuffer *
+        (stream.m_segmentDuration / 1000);  // 当前缓冲区水平（毫秒）
+    int64_t nowMs = Simulator::Now().GetMilliSeconds();
+    UpdateBufferState(nowMs, bufferMs, stream.m_bufferTrendState);
+
     stream.m_currentPlaybackIndex++;  // 当前播放段索引加1
     return false;                     // 返回 false 表示播放成功
   }
@@ -1006,7 +1268,8 @@ bool MultiTcpAvStreamClient::PlaybackHandleAV(StreamData& stream) {
 
       stream.bufferUnderrunLog << std::setfill(' ') << std::setw(26)
                                << timeNow / (double)1000000 << " ";
-      stream.bufferUnderrunLog.flush();  // 立即刷新到文件
+      stream.bufferUnderrunLog.flush();            // 立即刷新到文件
+      stream.m_bufferUnderrunStartTime = timeNow;  // 记录缓冲不足开始时间
     }
     if (r_stream->m_bufferUnderrun) {
       // 对方流缓冲不足，不能播放
@@ -1018,7 +1281,8 @@ bool MultiTcpAvStreamClient::PlaybackHandleAV(StreamData& stream) {
                   << timeNow / (double)1000000);  // 日志宏
       r_stream->bufferUnderrunLog << std::setfill(' ') << std::setw(26)
                                   << timeNow / (double)1000000 << " ";
-      r_stream->bufferUnderrunLog.flush();  // 立即刷新到文件
+      r_stream->bufferUnderrunLog.flush();            // 立即刷新到文件
+      r_stream->m_bufferUnderrunStartTime = timeNow;  // 记录缓冲不足开始时间
     }
     return true;  // 缓冲不足,无法播放
   } else if (stream.m_segmentsInBuffer > 0) {
@@ -1032,6 +1296,8 @@ bool MultiTcpAvStreamClient::PlaybackHandleAV(StreamData& stream) {
                                << timeNow / (double)1000000
                                << "\n";  // 记录缓冲恢复时间
       stream.bufferUnderrunLog.flush();
+      qoe_Ts += (timeNow - stream.m_bufferUnderrunStartTime) / 1000000.0;
+      NS_LOG_INFO("当前qoe_Ts: " << qoe_Ts << "s");
     }
 
     // 获取当前段的 PTS
@@ -1055,6 +1321,24 @@ bool MultiTcpAvStreamClient::PlaybackHandleAV(StreamData& stream) {
                              << timeNow / (double)1000000);  // 日志宏
       LogPlayback(stream.m_type);                            // 写入播放日志
       stream.m_segmentsInBuffer--;
+      stream.m_bufferData.m_segmentsInBuffer--;
+
+      stream.m_bufferData.segmentSizes.pop_front();  // 移除已播放段的大小记录
+
+      int64_t bufferMs =
+          stream.m_bufferData.m_segmentsInBuffer *
+          (stream.m_segmentDuration / 1000);  // 当前缓冲区水平（毫秒）
+      int64_t nowMs = Simulator::Now().GetMilliSeconds();
+
+      UpdateBufferState(nowMs, bufferMs, stream.m_bufferTrendState);
+
+      // 缓冲区变化记录
+      LogBuffer_v2(stream.m_type, timeNow);
+      NS_LOG_INFO(streamName << " 流播放 " << stream.m_currentPlaybackIndex
+                             << " 缓冲区减少变为 "
+                             << (stream.m_bufferData.m_segmentsInBuffer *
+                                 stream.m_bufferData.m_segmentDuration) /
+                                    (double)1e6);
       stream.m_currentPlaybackIndex++;
       stream.m_ptsQueue.pop();
       // 将这个播放时间统计到位，用来计算缓冲区长度
@@ -1068,67 +1352,6 @@ bool MultiTcpAvStreamClient::PlaybackHandleAV(StreamData& stream) {
     }
   }
   return true;
-}
-// 处理多流播放的函数
-bool MultiTcpAvStreamClient::PlaybackHandleAV() {
-  NS_LOG_FUNCTION(this);
-
-  int64_t timeNow = Simulator::Now().GetMicroSeconds();
-  std::string s1 = "播放 视频 第 " +
-                   std::to_string(m_videoStream.m_currentPlaybackIndex) +
-                   " 段 ";
-  std::string s2 = "播放 音频 第 " +
-                   std::to_string(m_audioStream.m_currentPlaybackIndex) +
-                   " 段 ";
-  NS_LOG_INFO(s1 << s2);
-  // 核心判断：是否允许 A/V 同时播放
-  if (!CanPlayAvTogether()) {
-    if (m_videoStream.m_bufferUnderrun) {
-      NS_LOG_INFO("视频段 " << m_videoStream.m_currentPlaybackIndex
-                            << " 缓存不足无法播放 "
-                            << timeNow / (double)1000000);  // 日志宏
-      // 写入缓冲不足日志：记录开始时间
-      m_videoStream.bufferUnderrunLog << std::setfill(' ') << std::setw(26)
-                                      << timeNow / (double)1000000 << " ";
-      m_videoStream.bufferUnderrunLog.flush();  // 立即刷新到文件
-    }
-    if (m_audioStream.m_bufferUnderrun) {
-      NS_LOG_INFO("视频段 " << m_audioStream.m_currentPlaybackIndex
-                            << " 缓存不足无法播放 "
-                            << timeNow / (double)1000000);  // 日志宏
-      // 写入缓冲不足日志：记录开始时间
-      m_audioStream.bufferUnderrunLog << std::setfill(' ') << std::setw(26)
-                                      << timeNow / (double)1000000 << " ";
-      m_audioStream.bufferUnderrunLog.flush();  // 立即刷新到文件
-    }
-    return true;  // 缓冲不足,无法播放
-  } else if (m_videoStream.m_segmentsInBuffer > 0 &&
-             m_audioStream.m_segmentsInBuffer > 0) {
-    // ====== A/V 同步播放 ======
-    // video
-    m_videoStream.m_segmentsInBuffer--;
-    m_videoStream.m_currentPlaybackIndex++;
-    m_videoStream.m_playbackData.playbackStart.push_back(timeNow);
-    LogPlayback(VIDEO_STREAM);  // 写入播放日志
-    // audio
-    m_audioStream.m_segmentsInBuffer--;
-    m_audioStream.m_currentPlaybackIndex++;
-    m_videoStream.m_playbackData.playbackStart.push_back(timeNow);
-    LogPlayback(AUDIO_STREAM);  // 写入播放日志
-    // underrun 恢复
-    if (m_videoStream.m_bufferUnderrun) {
-      m_videoStream.m_bufferUnderrun = false;
-      m_videoStream.bufferUnderrunLog << timeNow / 1e6 << "\n";
-    }
-
-    if (m_audioStream.m_bufferUnderrun) {
-      m_audioStream.m_bufferUnderrun = false;
-      m_audioStream.bufferUnderrunLog << timeNow / 1e6 << "\n";
-    }
-
-    return false;  // 播放成功
-  }
-  return true;  // 所有段全部播放完成
 }
 
 bool MultiTcpAvStreamClient::IsBufferEmpty(StreamType type) {
@@ -1170,20 +1393,110 @@ void MultiTcpAvStreamClient::SetAudioRemote(Address ip, uint16_t port) {
   m_audioStream.m_peerPort = port;
 }
 
-// 检查两个流是否都已连接
-bool MultiTcpAvStreamClient::BothStreamsConnected() {
-  return m_videoConnected && m_audioConnected;
-}
-
-// 检查两个流的当前段是否都已接收完成
-bool MultiTcpAvStreamClient::BothSegmentsReceived() {
-  return m_videoStream.m_SegmentReceived && m_audioStream.m_SegmentReceived;
-}
-
 // 释放资源函数
 void MultiTcpAvStreamClient::DoDispose(void) {
   NS_LOG_FUNCTION(this);
   Application::DoDispose();  // 调用父类的释放函数
+}
+
+void MultiTcpAvStreamClient::VideoCwndChange(uint32_t oldCwnd,
+                                             uint32_t newCwnd) {
+  NS_LOG_INFO("Video At time " << Simulator::Now().GetSeconds()
+                               << "s cwnd changed from " << oldCwnd / 1448
+                               << " to " << newCwnd / 1448);
+}
+void MultiTcpAvStreamClient::AudioCwndChange(uint32_t oldCwnd,
+                                             uint32_t newCwnd) {
+  NS_LOG_INFO("Audio At time " << Simulator::Now().GetSeconds()
+                               << "s cwnd changed from " << oldCwnd / 1448
+                               << " to " << newCwnd / 1448);
+}
+void MultiTcpAvStreamClient::VideoBytesInFlightTrace(uint32_t oldBytes,
+                                                     uint32_t newBytes) {
+  NS_LOG_INFO("Video At time " << Simulator::Now().GetSeconds()
+                               << "s  BytesInFlight: " << oldBytes << " -> "
+                               << newBytes);
+}
+void MultiTcpAvStreamClient::AudioBytesInFlightTrace(uint32_t oldBytes,
+                                                     uint32_t newBytes) {
+  NS_LOG_INFO("Audio At time " << Simulator::Now().GetSeconds()
+                               << "s  BytesInFlight: " << oldBytes << " -> "
+                               << newBytes);
+}
+void MultiTcpAvStreamClient::VideoRtxTrace(SequenceNumber32 seq) {
+  NS_LOG_INFO("Video At time " << Simulator::Now().GetSeconds()
+                               << " RTO retransmit seq=" << seq);
+}
+void MultiTcpAvStreamClient::AudioRtxTrace(SequenceNumber32 seq) {
+  NS_LOG_INFO("Audio At time " << Simulator::Now().GetSeconds()
+                               << " RTO retransmit seq=" << seq);
+}
+void MultiTcpAvStreamClient::VideoOwdTrace(Time owd, SequenceNumber32 txSeq,
+                                           uint32_t payloadSize,
+                                           bool isRetrans) {
+  // NS_LOG_INFO(Simulator::Now().GetSeconds()
+  //             << "s Video OWD: seq=" << txSeq << " size=" << payloadSize
+  //             << " retrans=" << isRetrans << " owd=" << owd.GetMilliSeconds()
+  //             << " ms");
+  AddOwdSample(m_videoStream, Simulator::Now().GetMilliSeconds(),
+               owd.GetMilliSeconds());
+}
+void MultiTcpAvStreamClient::AudioOwdTrace(Time owd, SequenceNumber32 txSeq,
+                                           uint32_t payloadSize,
+                                           bool isRetrans) {
+  // NS_LOG_INFO(Simulator::Now().GetSeconds()
+  //             << "s Audio OWD: seq=" << txSeq << " size=" << payloadSize
+  //             << " retrans=" << isRetrans << " owd=" << owd.GetMilliSeconds()
+  //             << " ms");
+  AddOwdSample(m_audioStream, Simulator::Now().GetMilliSeconds(),
+               owd.GetMilliSeconds());
+}
+
+void MultiTcpAvStreamClient::UpdateBufferState(int64_t nowMs, int64_t bufferMs,
+                                               BufferTrendState& s) {
+  // ---------- 1) 低缓冲 ----------
+  if (bufferMs <= LOW_TH_MS) {
+    if (s.lowStartMs < 0) s.lowStartMs = nowMs;
+
+    s.isLow = (nowMs - s.lowStartMs >= PERSIST_TH_MS);
+  } else {
+    s.lowStartMs = -1;
+    s.isLow = false;
+  }
+
+  // ---------- 2) 严重低缓冲 ----------
+  if (bufferMs <= SEVERE_LOW_TH_MS) {
+    if (s.severeLowStartMs < 0) s.severeLowStartMs = nowMs;
+
+    s.isSevereLow = (nowMs - s.severeLowStartMs >= PERSIST_TH_MS);
+  } else {
+    s.severeLowStartMs = -1;
+    s.isSevereLow = false;
+  }
+
+  // ---------- 3) 持续走低 ----------
+  if (s.lastBufferMs >= 0) {
+    int64_t delta = bufferMs - s.lastBufferMs;
+
+    if (delta < -EPS_MS) {
+      // 明显下降
+      if (s.declineStartMs < 0) s.declineStartMs = s.lastTimeMs;
+
+      s.isDeclining = (nowMs - s.declineStartMs >= PERSIST_TH_MS);
+    } else if (delta > EPS_MS) {
+      // 明显恢复
+      s.declineStartMs = -1;
+      s.isDeclining = false;
+    } else {
+      // 基本不变
+      if (s.declineStartMs >= 0) {
+        s.isDeclining = (nowMs - s.declineStartMs >= PERSIST_TH_MS);
+      }
+    }
+  }
+
+  s.lastBufferMs = bufferMs;
+  s.lastTimeMs = nowMs;
 }
 
 // 启动应用程序
@@ -1214,13 +1527,45 @@ void MultiTcpAvStreamClient::StartApplication(void) {
       m_videoStream.m_socket->SetConnectCallback(
           MakeCallback(&MultiTcpAvStreamClient::ConnectionSucceeded, this),
           MakeCallback(&MultiTcpAvStreamClient::ConnectionFailed, this));
-
+      NS_LOG_INFO("Video stream connecting to port "
+                  << m_videoStream.m_peerPort);
       // 设置接收数据回调
       m_videoStream.m_socket->SetRecvCallback(
           MakeCallback(&MultiTcpAvStreamClient::HandleRead, this));
 
-      NS_LOG_INFO("Video stream connecting to port "
-                  << m_videoStream.m_peerPort);
+      /*
+        下面这些全部不准，在网络拓扑连接设置那里调整才是对的
+      */
+      // 设置Rtt回调
+      // m_videoStream.m_socket->TraceConnectWithoutContext(
+      //     "RTT", MakeCallback(&MultiTcpAvStreamClient::VideoRttTrace, this));
+
+      // // 设置 TCP拥塞发送窗口回调
+      // Ptr<TcpSocketBase> tcpSock =
+      //     DynamicCast<TcpSocketBase>(m_videoStream.m_socket);
+
+      // tcpSock->TraceConnectWithoutContext(
+      //     "CongestionWindow",
+      //     MakeCallback(&MultiTcpAvStreamClient::VideoCwndChange, this));
+
+      // tcpSock->TraceConnectWithoutContext(
+      //     "BytesInFlight",
+      //     MakeCallback(&MultiTcpAvStreamClient::VideoBytesInFlightTrace,
+      //     this));
+
+      // // 设置重传回调
+      // tcpSock->TraceConnectWithoutContext(
+      //     "Retransmission",
+      //     MakeCallback(&MultiTcpAvStreamClient::VideoRtxTrace, this));
+
+      // 开始定期采样Rtt
+      // Simulator::Schedule(m_RttSampleInterval,
+      //                     &MultiTcpAvStreamClient::SampleVideoRtt, this);
+      // NS_LOG_INFO("Video stream 开始定期采样Rtt "
+      //             << "采样周期" << m_RttSampleInterval << "采样最大窗口"
+      //             << m_maxRttSamples);
+      m_videoStream.m_socket->TraceConnectWithoutContext(
+          "Owd", MakeCallback(&MultiTcpAvStreamClient::VideoOwdTrace, this));
     }
   }
   // ================================
@@ -1244,15 +1589,209 @@ void MultiTcpAvStreamClient::StartApplication(void) {
           MakeCallback(&MultiTcpAvStreamClient::ConnectionSucceeded, this),
           MakeCallback(&MultiTcpAvStreamClient::ConnectionFailed, this));
 
+      NS_LOG_INFO("Audio stream connecting to port "
+                  << m_audioStream.m_peerPort);
+
       m_audioStream.m_socket->SetRecvCallback(
           MakeCallback(&MultiTcpAvStreamClient::HandleRead, this));
 
-      NS_LOG_INFO("Audio stream connecting to port "
-                  << m_audioStream.m_peerPort);
+      // m_audioStream.m_socket->TraceConnectWithoutContext(
+      //     "RTT", MakeCallback(&MultiTcpAvStreamClient::AudioRttTrace, this));
+
+      // 开始定期采样Rtt
+      // Simulator::Schedule(m_RttSampleInterval,
+      //                     &MultiTcpAvStreamClient::SampleAudioRtt, this);
+
+      // NS_LOG_INFO("Audio stream 开始定期采样Rtt "
+      //             << "采样周期" << m_RttSampleInterval << "采样最大窗口"
+      //             << m_maxRttSamples);
+
+      // Ptr<TcpSocketBase> tcpSock =
+      //     DynamicCast<TcpSocketBase>(m_audioStream.m_socket);
+
+      // tcpSock->TraceConnectWithoutContext(
+      //     "CongestionWindow",
+      //     MakeCallback(&MultiTcpAvStreamClient::AudioCwndChange, this));
+      // tcpSock->TraceConnectWithoutContext(
+      //     "BytesInFlight",
+      //     MakeCallback(&MultiTcpAvStreamClient::AudioBytesInFlightTrace,
+      //     this));
+      // tcpSock->TraceConnectWithoutContext(
+      //     "Retransmission",
+      //     MakeCallback(&MultiTcpAvStreamClient::AudioRtxTrace, this));
+      m_audioStream.m_socket->TraceConnectWithoutContext(
+          "Owd", MakeCallback(&MultiTcpAvStreamClient::AudioOwdTrace, this));
     }
+  }
+  m_sbCc.SetWindow(MilliSeconds(350));
+  m_sbCc.SetAudioFlow(Ipv4Address::ConvertFrom(m_audioStream.m_peerAddress),
+                      m_audioStream.m_peerPort);
+  m_sbCc.SetVideoFlow(Ipv4Address::ConvertFrom(m_videoStream.m_peerAddress),
+                      m_videoStream.m_peerPort);
+  // 每隔一段时间就检测一次共享瓶颈
+  // Simulator::Schedule(Seconds(2.0), &MultiTcpAvStreamClient::DetectSbd,
+  // this);
+  // 每个 350ms 检测一次共享瓶颈
+  Simulator::Schedule(Seconds(0.350),
+                      &MultiTcpAvStreamClient::SharedBottleneckDetected, this);
+}
+
+void MultiTcpAvStreamClient::SampleOneStreamRtt(StreamData& stream) {
+  Time now = Simulator::Now();
+  // NS_LOG_INFO(ToStringStreamType(stream.m_type)
+  //             << "采样Rtt: " << stream.m_LatestRtt.GetMilliSeconds()
+  //             << "  系统时间：" << now.GetMicroSeconds() / (double)1000000);
+  if (!stream.m_LatestRtt.IsZero()) {
+    RttEvent ev;
+    ev.rxTime = now;
+    ev.rtt = stream.m_LatestRtt.GetMilliSeconds();
+    stream.m_Rtts.push_back(ev);
+
+    // 限制队列长度（非常重要）
+    // 100ms 一次采样，10次也就是1s，窗口定为50s，也就是500次采样。
+    if (stream.m_Rtts.size() > m_maxRttSamples) stream.m_Rtts.pop_front();
   }
 }
 
+void MultiTcpAvStreamClient::SampleVideoRtt() {
+  SampleOneStreamRtt(m_videoStream);
+
+  Simulator::Schedule(m_RttSampleInterval,
+                      &MultiTcpAvStreamClient::SampleVideoRtt, this);
+}
+
+void MultiTcpAvStreamClient::SampleAudioRtt() {
+  SampleOneStreamRtt(m_audioStream);
+
+  Simulator::Schedule(m_RttSampleInterval,
+                      &MultiTcpAvStreamClient::SampleAudioRtt, this);
+}
+
+// 旧版（粗糙版本）共享瓶颈检测函数
+void MultiTcpAvStreamClient::DetectSbd() {
+  // 没有开启检查功能，就不执行相关逻辑
+  if (!m_enableSharedBottleneckAwareAbr) return;
+  m_sbd.UpdataMaxLag(m_videoStream.m_Rtts, m_audioStream.m_Rtts,
+                     m_RttSampleInterval, m_maxRttSamples);
+  std::pair<bool, double> res =
+      m_sbd.Detect(m_videoStream.m_Rtts, m_audioStream.m_Rtts);
+  NS_LOG_INFO("相似度：" << res.second << "  窗口偏移大小"
+                         << m_sbd.GetMaxLag());
+
+  if (res.first) {
+    NS_LOG_INFO("成功进入共享瓶颈状态");
+    // 调整 ABR / chunk size
+    m_videoStream.m_bufferData.isInSB = true;
+    m_audioStream.m_bufferData.isInSB = true;
+  } else {
+    m_videoStream.m_bufferData.isInSB = false;
+    m_audioStream.m_bufferData.isInSB = false;
+  }
+
+  Simulator::Schedule(Seconds(2.0), &MultiTcpAvStreamClient::DetectSbd, this);
+}
+
+void MultiTcpAvStreamClient::DumpSbdFlags(const std::deque<bool>& flags,
+                                          bool currentInSbd) const {
+  NS_LOG_INFO("========== MPTCP-SBD Detection ==========");
+  NS_LOG_INFO("Current inSbd     : " << currentInSbd);
+  NS_LOG_INFO("SBD Flags count   : " << flags.size());
+  NS_LOG_INFO("SBD Flags window  :");
+
+  int idx = 0;
+  int trueCount = 0;
+  for (bool flag : flags) {
+    NS_LOG_INFO("  [" << idx << "] " << flag);
+    if (flag) {
+      trueCount++;
+    }
+    idx++;
+  }
+
+  NS_LOG_INFO("True count        : " << trueCount);
+
+  if (flags.size() > 5 && trueCount >= 5) {
+    NS_LOG_INFO("Shared Bottleneck : ENTERED");
+  } else {
+    NS_LOG_INFO("Shared Bottleneck : NOT ENTERED");
+  }
+
+  NS_LOG_INFO("========================================");
+}
+
+// 多种SBD算法
+void MultiTcpAvStreamClient::SharedBottleneckDetected() {
+  NS_LOG_FUNCTION(this);
+  NS_LOG_INFO("time: " << Simulator::Now().GetMicroSeconds() / (double)1000000);
+  if (m_enableMptcpSbd) {
+    // 进行 MPTCP-SBD 算法
+    NS_LOG_INFO("进行 MPTCP-SBD 算法检测共享瓶颈");
+    std::pair<bool, bool> inSbd =
+        MPTCP_SBD::isSharedBottleneck(m_videoStream.m_sbd, m_audioStream.m_sbd);
+    bool mptcp_sbd_result = inSbd.first;
+    bool ours_sbd_result = false;
+    // 至少有一个流持续走低，增加进入共享瓶颈的可能性
+    if (m_videoStream.m_bufferTrendState.isDeclining ||
+        m_audioStream.m_bufferTrendState.isDeclining ||
+        m_videoStream.m_bufferTrendState.isLow ||
+        m_audioStream.m_bufferTrendState.isLow ||
+        m_videoStream.m_bufferTrendState.isSevereLow ||
+        m_audioStream.m_bufferTrendState.isSevereLow) {
+      NS_LOG_INFO("至少有一个流持续走低，增加进入共享瓶颈的可能性");
+      ours_sbd_result = inSbd.second;
+      NS_LOG_INFO("我们的SBD算法检测结果: "
+                  << (ours_sbd_result ? "共享瓶颈" : "非共享瓶颈"));
+    }
+    m_OurinSbdFlags.push_back(ours_sbd_result);
+    if (m_OurinSbdFlags.size() > 10) {
+      m_OurinSbdFlags.pop_front();
+    }
+    int oursCount = 0;
+    for (bool flag : m_OurinSbdFlags) {
+      if (flag) oursCount++;
+    }
+    if (ours_sbd_result) {
+      NS_LOG_INFO("我们的SBD算法检测到共享瓶颈");
+      if (preTimeLog_oursbd != (int)Simulator::Now().GetSeconds()) {
+        preTimeLog_oursbd = (int)Simulator::Now().GetSeconds();
+        m_OurSbdLog << (int)Simulator::Now().GetSeconds() << "    "
+                    << "1" << "\n";
+        m_OurSbdLog.flush();
+      }
+      m_videoStream.m_bufferData.isInSB = true;
+      m_audioStream.m_bufferData.isInSB = true;
+    } else if (oursCount <= 0) {
+      // 防止 启发式的ABR算法频繁的震荡
+      m_videoStream.m_bufferData.isInSB = false;
+      m_audioStream.m_bufferData.isInSB = false;
+    }
+    m_MpTcpinSbdFlags.push_back(mptcp_sbd_result);
+    NS_LOG_INFO("video PB:" << m_videoStream.m_sbd.GetPB()
+                            << "   audio PB:" << m_audioStream.m_sbd.GetPB());
+
+    if (m_MpTcpinSbdFlags.size() > 10) {
+      m_MpTcpinSbdFlags.pop_front();
+    }
+    int count = 0;
+    if (m_MpTcpinSbdFlags.size() > 2) {
+      for (bool flag : m_MpTcpinSbdFlags) {
+        if (flag) count++;
+      }
+      if (count >= 2) {
+        if (preTimeLog_mptcpsbd != (int)Simulator::Now().GetSeconds()) {
+          preTimeLog_mptcpsbd = (int)Simulator::Now().GetSeconds();
+          m_mptcpsbdLog << preTimeLog_mptcpsbd << "    "
+                        << "1" << "\n";
+          m_mptcpsbdLog.flush();
+          NS_LOG_INFO("MPTCP-SBD进入共享瓶颈状态");
+        }
+      }
+    }
+    // DumpSbdFlags(m_MpTcpinSbdFlags, mptcp_sbd_result);
+  }
+  Simulator::Schedule(Seconds(0.350),
+                      &MultiTcpAvStreamClient::SharedBottleneckDetected, this);
+}
 // 停止应用程序
 void MultiTcpAvStreamClient::StopApplication() {
   NS_LOG_FUNCTION(this);
@@ -1280,6 +1819,7 @@ void MultiTcpAvStreamClient::StopApplication() {
   m_videoStream.bufferLog.close();
   m_videoStream.throughputLog.close();
   m_videoStream.bufferUnderrunLog.close();
+  m_videoStream.owdLog.close();
 
   m_audioStream.downloadLog.close();
   m_audioStream.playbackLog.close();
@@ -1287,7 +1827,11 @@ void MultiTcpAvStreamClient::StopApplication() {
   m_audioStream.bufferLog.close();
   m_audioStream.throughputLog.close();
   m_audioStream.bufferUnderrunLog.close();
+  m_audioStream.owdLog.close();
 
+  m_mptcpsbdLog.close();
+  m_SbCcLog.close();
+  m_OurSbdLog.close();
   // m_avSyncLog.close();
 }
 
@@ -1351,6 +1895,43 @@ void MultiTcpAvStreamClient::ConnectionFailed(Ptr<Socket> socket) {
   } else if (socket == m_audioStream.m_socket) {
     NS_LOG_ERROR("Audio stream connection failed");
   }
+}
+
+// 记录时间窗口相关数据
+void MultiTcpAvStreamClient::LogOwdWindow(StreamData& stream,
+                                          const OwdInfo& w) {
+  NS_LOG_FUNCTION(this << ToStringStreamType(stream.m_type));
+  int64_t end_time = w.m_NowWindowEnd;
+  int64_t start_time = end_time - WINDOW_MS;
+  size_t numbers = w.owds.size();
+
+  int64_t min_owd = 0;
+  int64_t max_owd = 0;
+  double mean_owd = 0.0;
+
+  if (!w.owds.empty()) {
+    min_owd = w.owds[0];
+    max_owd = w.owds[0];
+    int64_t sum = 0;
+
+    for (auto owd : w.owds) {
+      sum += owd;
+      if (owd < min_owd) min_owd = owd;
+      if (owd > max_owd) max_owd = owd;
+    }
+    mean_owd = static_cast<double>(sum) / w.owds.size();
+  }
+
+  // 写日志（你可以提前在 StreamData 里定义 owdLog）
+  stream.owdLog << std::setfill(' ') << std::setw(12)
+                << start_time / (double)1000 << " " << std::setfill(' ')
+                << std::setw(12) << end_time / (double)1000 << " "
+                << std::setfill(' ') << std::setw(8) << numbers << " "
+                << std::setfill(' ') << std::setw(8) << min_owd << " "
+                << std::setfill(' ') << std::setw(8) << max_owd << " "
+                << std::setfill(' ') << std::setw(10) << mean_owd << "\n";
+
+  stream.owdLog.flush();
 }
 
 // 记录吞吐量日志
@@ -1419,6 +2000,23 @@ void MultiTcpAvStreamClient::LogBuffer(StreamType streamType) {
       << "\n";
   streamData->bufferLog.flush();
 }
+// 记录缓冲区日志
+void MultiTcpAvStreamClient::LogBuffer_v2(StreamType streamType,
+                                          int64_t timeNow) {
+  NS_LOG_FUNCTION(this << ToStringStreamType(streamType));
+
+  StreamData* streamData = GetStreamData(streamType);
+  if (streamData == NULL) return;
+
+  // 写入缓冲区日志
+  streamData->bufferLog << std::setfill(' ') << std::setw(13) << timeNow / 1e6
+                        << " " << std::setfill(' ') << std::setw(13)
+                        << (streamData->m_bufferData.m_segmentsInBuffer *
+                            streamData->m_bufferData.m_segmentDuration) /
+                               1e6
+                        << "\n";
+  streamData->bufferLog.flush();
+}
 
 // 记录自适应算法日志
 void MultiTcpAvStreamClient::LogAdaptation(algorithmReply answer,
@@ -1465,6 +2063,24 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
   // 初始化日志文件
   std::string basePrefix =
       dashLogDirectory + "/sim" + simulationId + "_" + "cl" + numberOfClients;
+
+  std::string sharedBottleneckLog = basePrefix + "/MptcpSbd.txt";
+  m_mptcpsbdLog.open(sharedBottleneckLog.c_str());
+  m_mptcpsbdLog << "Time    "
+                << "isSharedBottleneck\n";
+  m_mptcpsbdLog.flush();
+
+  std::string sbCcLog = basePrefix + "/SbCcLog.txt";
+  m_SbCcLog.open(sbCcLog.c_str());
+  m_SbCcLog << "Time    "
+            << "isSharedBottleneck\n";
+  m_SbCcLog.flush();
+
+  std::string ourSbdLog = basePrefix + "/ourSbdLog.txt";
+  m_OurSbdLog.open(ourSbdLog.c_str());
+  m_OurSbdLog << "Time    "
+              << "isSharedBottleneck\n";
+  m_OurSbdLog.flush();
 
   std::string videoPrefix =
       basePrefix + "/" + "video_" + m_videoStream.m_algoName;
@@ -1513,6 +2129,29 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
       << "Buffer_Underrun_Started_At         Until \n";
   m_videoStream.bufferUnderrunLog.flush();
 
+  // 视频流 OWD 窗口日志
+  std::string vOwdLog = videoPrefix + "/owdWindowLog.txt";
+  m_videoStream.owdLog.open(vOwdLog.c_str());
+  m_videoStream.owdLog << std::setfill(' ') << std::setw(12) << "WinStart"
+                       << " " << std::setw(12) << "WinEnd"
+                       << " " << std::setw(8) << "Samples_Number"
+                       << " " << std::setw(8) << "Min"
+                       << " " << std::setw(8) << "Max"
+                       << " " << std::setw(10) << "Mean"
+                       << "\n";
+  m_videoStream.owdLog.flush();
+
+  // 视频流 队列长度日志
+  std::string vqLog = videoPrefix + "/queueLog.txt";
+  m_videoStream.queueLog.open(vqLog.c_str());
+  m_videoStream.queueLog << std::setfill(' ') << std::setw(12) << "Time_Now"
+                         << " " << std::setw(12) << "EnQueue"
+                         << " " << std::setw(8) << "Queue"
+                         << " " << std::setw(8) << "Dequeue"
+                         << " " << std::setw(8) << "Drop"
+                         << "\n";
+  m_videoStream.queueLog.flush();
+
   // 音频下载日志
   std::string adLog = audioPrefix + "/downloadLog.txt";
   m_audioStream.downloadLog.open(adLog.c_str());
@@ -1552,6 +2191,29 @@ void MultiTcpAvStreamClient::InitializeLogFiles(std::string simulationId,
   m_audioStream.bufferUnderrunLog
       << "Buffer_Underrun_Started_At         Until \n";
   m_audioStream.bufferUnderrunLog.flush();
+
+  // 音频流 OWD 窗口日志
+  std::string aOwdLog = audioPrefix + "/owdWindowLog.txt";
+  m_audioStream.owdLog.open(aOwdLog.c_str());
+  m_audioStream.owdLog << std::setfill(' ') << std::setw(12) << "WinStart"
+                       << " " << std::setw(12) << "WinEnd"
+                       << " " << std::setw(8) << "Samples_Number"
+                       << " " << std::setw(8) << "Min"
+                       << " " << std::setw(8) << "Max"
+                       << " " << std::setw(10) << "Mean"
+                       << "\n";
+  m_audioStream.owdLog.flush();
+
+  // 音频流 队列长度日志
+  std::string aqLog = audioPrefix + "/queueLog.txt";
+  m_audioStream.queueLog.open(aqLog.c_str());
+  m_audioStream.queueLog << std::setfill(' ') << std::setw(12) << "Time_Now"
+                         << " " << std::setw(12) << "EnQueue"
+                         << " " << std::setw(8) << "Queue"
+                         << " " << std::setw(8) << "Dequeue"
+                         << " " << std::setw(8) << "Drop"
+                         << "\n";
+  m_audioStream.queueLog.flush();
 
   NS_LOG_INFO("Log files initialized for client " << clientId);
 }

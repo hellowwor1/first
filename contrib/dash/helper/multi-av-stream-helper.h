@@ -32,8 +32,9 @@ class MultiTcpAvStreamServerHelper {
   MultiTcpAvStreamServerHelper(uint16_t videoPort, uint16_t audioPort);
 
   /**
-   * 创建MultiTcpAvStreamServerHelper，使用默认端口
-   * 视频端口：10000，音频端口：10001
+   * 创建MultiTcpAvStreamServerHelper
+   * 默认视频端口：10000
+   * 默认音频端口：10001
    */
   MultiTcpAvStreamServerHelper();
 

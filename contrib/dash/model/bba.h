@@ -15,9 +15,11 @@ class BbaAlgorithm : public AdaptationAlgorithm {
 
  private:
   // ===== BBA 核心参数 =====
-  double m_reservoir;  // buffer 下限（秒）
-  double m_cushion;    // buffer 映射区间（秒）
-  int m_highestRepIndex;
+  const double m_reservoir;     // buffer 下限（秒）
+  const double m_cushion;       // buffer 映射区间（秒）
+  const int64_t m_targetBuf;    // buffer 最大值
+  const int64_t m_delta;
+  const int m_highestRepIndex;  // 最大码率
 };
 
 }  // namespace ns3

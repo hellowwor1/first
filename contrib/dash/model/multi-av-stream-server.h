@@ -10,7 +10,8 @@
 #include "ns3/ptr.h"
 #include "ns3/random-variable-stream.h"
 #include "ns3/traced-callback.h"
-
+// 打入流标签
+#include "flowtag.h"
 namespace ns3 {
 
 class Socket;
@@ -156,6 +157,9 @@ class MultiTcpAvStreamServer : public Application {
    * 可以通过port轻松分辨是请求音频资源还是视频资源
    */
   std::vector<Address> m_connectedClients;
+
+  // 发送数据包的序列号
+  uint64_t p_seq = 10;
 };
 
 }  // namespace ns3

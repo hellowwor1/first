@@ -1,6 +1,6 @@
 #ifndef TCP_STREAM_INTERFACE_H
 #define TCP_STREAM_INTERFACE_H
-
+#include <deque>
 namespace ns3 {
 
 // DASH 日志文件目录
@@ -23,6 +23,26 @@ struct algorithmReply {
   int64_t delayDecisionCase;  //!< 决定延迟多少微秒请求片段的代码部分，用于日志
 };
 
+struct CooperationData {
+  std::vector<uint32_t>& currentVideoRep;
+  std::vector<uint32_t>& currentAudioRep;
+  std::vector<uint32_t>& videoBufferLevel;
+  std::vector<uint32_t>& audioBufferLevel;
+
+  const double highBufferThreshold = 15.0;
+  const double lowBufferThreshold = 5.0;
+  const double fairnessMargin = 1.2;
+
+  CooperationData(std::vector<uint32_t>& videoRep,
+                  std::vector<uint32_t>& audioRep,
+                  std::vector<uint32_t>& videoBuf,
+                  std::vector<uint32_t>& audioBuf)
+      : currentVideoRep(videoRep),
+        currentAudioRep(audioRep),
+        videoBufferLevel(videoBuf),
+        audioBufferLevel(audioBuf) {}
+};
+
 /*! \class throughputData tcp-stream-interface.h "model/tcp-stream-interface.h"
  *  \ingroup tcpStream
  *  \brief 存储吞吐量数据
@@ -38,6 +58,7 @@ struct throughputData {
   std::vector<int64_t>
       transmissionEnd;  //!< 收到片段最后一个数据包的模拟时间（微秒）
   std::vector<int64_t> bytesReceived;  //!< 接收的字节数，即片段大小
+  bool peerIsStalling;  //!< 对方是否处于停等状态（即没有请求片段）
 };
 
 /*! \class bufferData tcp-stream-interface.h "model/tcp-stream-interface.h"
@@ -51,7 +72,28 @@ struct bufferData {
   std::vector<int64_t>
       bufferLevelOld;  //!< 添加刚下载片段前的缓冲区长度（微秒）
   std::vector<int64_t>
-      bufferLevelNew;  //!< 添加刚下载片段后的缓冲区长度（微秒）
+      bufferLevelNew;                //!< 添加刚下载片段后的缓冲区长度（微秒）
+  int64_t m_segmentsInBuffer;        // 缓冲区内段数
+  std::deque<int64_t> segmentSizes;  // 最近下载的几个片段的大小（字节）
+  uint64_t m_segmentDuration;        // 每个段的持续时间
+  bool isInSB;                       // 判断是否处于共享瓶颈
+  double* qoe;                       // 当前的 QoE 得分
+  int64_t m_segmentCounter;          // 下一块要下载的块索引
+  bool isAudio;                      // 是否是音频流
+};
+
+// 追踪缓冲区变化趋势
+struct BufferTrendState {
+  int64_t lastBufferMs = -1;  // 上一次观测到的 buffer level
+  int64_t lastTimeMs = -1;    // 上一次观测时间
+
+  int64_t declineStartMs = -1;    // 本轮持续下降的起点时间
+  int64_t lowStartMs = -1;        // 进入低缓冲区时间
+  int64_t severeLowStartMs = -1;  // 进入严重低缓冲区时间
+
+  bool isDeclining = false;  // 当前是否持续走低
+  bool isLow = false;        // 当前是否低缓冲
+  bool isSevereLow = false;  // 当前是否严重低缓冲
 };
 
 /*! \class videoData tcp-stream-interface.h "model/tcp-stream-interface.h"

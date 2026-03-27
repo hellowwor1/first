@@ -16,12 +16,14 @@
 // #include "ns3/tcp-stream-helper.h"       // TCP Stream server/client helper
 #include "ns3/bulk-send-helper.h"
 #include "ns3/ipv4-global-routing-helper.h"
+#include "ns3/ipv4-header.h"
 #include "ns3/ipv4-interface-container.h"
 #include "ns3/output-stream-wrapper.h"
 #include "ns3/packet-sink-helper.h"
+#include "ns3/queue-disc.h"
+#include "ns3/tcp-header.h"
 #include "ns3/tcp-stream-interface.h"    // TCP stream interface
 #include "ns3/traffic-control-module.h"  // 队列管理模块（FIFO、RED等）
-
 using namespace ns3;
 
 // 计算单程时延（将总 RTT 简化为 RTT/6）
@@ -128,6 +130,48 @@ void BottleneckIpv4TxTrace(Ptr<const Packet> packet, Ptr<Ipv4> ipv4,
     g_audioBytes += pktSize;
   }
 }
+void BottleneckQueueDequeueTrace(Ptr<const QueueDiscItem> item) {
+  static bool once = false;
+  if (!once) {
+    NS_LOG_UNCOND("QueueDisc Dequeue works!");
+    once = true;
+  }
+  // 1. 必须先 dynamic_cast
+  Ptr<const Ipv4QueueDiscItem> ipv4Item =
+      DynamicCast<const Ipv4QueueDiscItem>(item);
+
+  if (!ipv4Item) {
+    return;  // 不是 IPv4 包，直接忽略
+  }
+
+  Ptr<Packet> pkt = ipv4Item->GetPacket()->Copy();
+
+  Ipv4Header ipHeader;
+  TcpHeader tcpHeader;
+
+  // 2. 解析 IP 头（这里一定能成功）
+  pkt->RemoveHeader(ipHeader);
+
+  if (ipHeader.GetProtocol() != 6) {
+    return;  // 只统计 TCP
+  }
+
+  // 3. Peek TCP 头
+  if (!pkt->PeekHeader(tcpHeader)) {
+    return;
+  }
+
+  uint16_t srcPort = tcpHeader.GetSourcePort();
+
+  // 4. 用 QueueDiscItem 的 size
+  uint32_t pktSize = ipv4Item->GetSize();
+
+  if (srcPort == VIDEO_SRC_PORT) {
+    g_videoBytes += pktSize;
+  } else if (srcPort == AUDIO_SRC_PORT) {
+    g_audioBytes += pktSize;
+  }
+}
 
 void ReportBandwidthShare() {
   double now = Simulator::Now().GetSeconds();
@@ -170,7 +214,7 @@ int main(int argc, char *argv[]) {
   // 模拟id
   // 103 模拟 r0_r2与r2_c这2条链路上面有拥塞情况
   // 104 模拟畅通无阻
-  // 105 模拟有大量随机启动随机结束的背景流量
+  // 105 模拟有大量随机启动随机结束的背景流量(不同步的问题以及作出来)
   // 106 2个流之间的竞争问题作出来(使用时变链路带宽,不用随机的背景流量)
   uint32_t simulationId = 106;
   // 客户端总数为1个
@@ -327,7 +371,14 @@ int main(int argc, char *argv[]) {
 
   TrafficControlHelper tch1;
   tch1.SetRootQueueDisc(queueDisc);
-  tch1.Install(r2_to_c);
+  // tch1.Install(r2_to_c);
+  // tch1.SetRootQueueDisc("ns3::FqCoDelQueueDisc");
+  QueueDiscContainer qdiscs = tch1.Install(r2_to_c);
+  // 只取 root queue disc
+  // Ptr<QueueDisc> qdisc = qdiscs.Get(0);
+  // // 连接 Dequeue trace
+  // qdisc->TraceConnectWithoutContext("Dequeue",
+  //                                   MakeCallback(&BottleneckQueueDequeueTrace));
 
   // -------------------------------------------------------------------------
   //                               配置 IP 地址
@@ -453,10 +504,10 @@ int main(int argc, char *argv[]) {
   Simulator::Schedule(Seconds(1.0), &ReportBandwidthShare);
 
   // 每秒读取带宽trace，模拟时变的瓶颈链路
-  LoadBandwidthTrace("trace_v2.txt");
+  LoadBandwidthTrace("trace_sim106.txt");
   Simulator::Schedule(Seconds(0.0), &UpdateLinkBandwidth, bottleneckDev, 0);
 
-  Simulator::Stop(Seconds(399));
+  Simulator::Stop(Seconds(499));
   // Simulator::Schedule(Seconds(0.1), &SetCCA, servers.Get(0), "TcpBbr");
   Simulator::Run();
   Simulator::Destroy();

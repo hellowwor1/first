@@ -18,19 +18,21 @@
 #ifndef ADAPTATION_ALGORITHM_H
 #define ADAPTATION_ALGORITHM_H
 
-#include "ns3/application.h"
-#include <iostream>
+#include <assert.h>
+#include <math.h>
+#include <stdint.h>
+
+#include <algorithm>
 #include <fstream>
+#include <iostream>
+#include <numeric>
+#include <stdexcept>
+
+#include "ns3/application.h"
 #include "ns3/log.h"
 #include "ns3/nstime.h"
 #include "ns3/simulator.h"
-#include <stdint.h>
 #include "tcp-stream-interface.h"
-#include <stdexcept>
-#include <assert.h>
-#include <math.h>
-#include <numeric>
-#include <algorithm>
 
 namespace ns3 {
 /**
@@ -38,30 +40,37 @@ namespace ns3 {
  * \brief A base class for adaptation algorithms
  *
  */
-class AdaptationAlgorithm : public Object
-{
-public:
-  AdaptationAlgorithm ( const videoData &videoData,
-                        const playbackData & playbackData,
-                        const bufferData & bufferData,
-                        const throughputData & throughput  );
+class AdaptationAlgorithm : public Object {
+ public:
+  AdaptationAlgorithm(const videoData &videoData,
+                      const playbackData &playbackData,
+                      const bufferData &bufferData,
+                      const throughputData &throughput);
 
+  AdaptationAlgorithm(const videoData &videoData,
+                      const playbackData &playbackData,
+                      const bufferData &bufferData,
+                      const throughputData &throughput,
+                      const CooperationData &cooperationData);
   /**
    * \ingroup tcpStream
    * \brief Compute the next representation index
    *
    * Every Adaptation algorithm must overwrite the method.
    *
-   * \return struct containig the index of next representation to be downloaded and the inter-request delay.
+   * \return struct containig the index of next representation to be downloaded
+   * and the inter-request delay.
    */
-  virtual algorithmReply GetNextRep ( const int64_t segmentCounter, int64_t clientId) = 0;
+  virtual algorithmReply
+  GetNextRep(const int64_t segmentCounter, int64_t clientId) = 0;
 
-protected:
-  const videoData & m_videoData;
-  const bufferData & m_bufferData;
-  const throughputData & m_throughput;
-  const playbackData & m_playbackData;
+ protected:
+  const videoData &m_videoData;
+  const bufferData &m_bufferData;
+  const throughputData &m_throughput;
+  const playbackData &m_playbackData;
+  const CooperationData *m_cooperationData;
 };
-} // namespace ns3
+}  // namespace ns3
 
 #endif /* ADAPTATION_ALGORITHM_H */

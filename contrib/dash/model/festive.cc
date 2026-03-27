@@ -31,15 +31,15 @@ FestiveAlgorithm::FestiveAlgorithm(const videoData &videoData,
                                    const throughputData &throughput)
     : AdaptationAlgorithm(videoData, playbackData, bufferData, throughput),
       m_targetBuf(
-          60000000),  //  [初始化] 设定目标缓冲区为 60秒 (30,000,000 微秒)
+          24000000),  //  [初始化] 设定目标缓冲区为 60秒 (30,000,000 微秒)
       m_delta(
           m_videoData.segmentDuration),  // [初始化] 波动范围设为一个切片的时长
-      m_alpha(6.0),
+      m_alpha(12.0),
       // 一开始是12 现在大幅减少
       // [初始化] 稳定性权重，数值越大，算法越不愿意切换码率
       m_highestRepIndex(videoData.averageBitrate.size() -
                         1),  // [初始化] 获取最高码率档位
-      m_thrptThrsh(0.95)
+      m_thrptThrsh(0.85)
 // [初始化] 保守系数，只用估算带宽的 85%
 // 现在激进一点，用估算带宽的95%
 {
@@ -57,6 +57,9 @@ FestiveAlgorithm::FestiveAlgorithm(const videoData &videoData,
 algorithmReply
 FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
   int64_t timeNow = Simulator::Now().GetMicroSeconds();
+  NS_LOG_INFO("算法 GetNextRep 被调用，当前时间: " << timeNow / (double)1000000
+                                                   << " 秒, 当前切片索引: "
+                                                   << segmentCounter);
   bool decisionMade = false;  // 标记是否已经做出了“需要改变码率”的决定
   algorithmReply answer;
   answer.decisionTime = timeNow;
@@ -66,8 +69,7 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
   // [特殊情况] 如果是第一个切片，直接选最低码率（Index 0），快速起播
   // v2 选择中等画质
   if (segmentCounter == 0) {
-    // answer.nextRepIndex = 0;
-    answer.nextRepIndex = 3;
+    answer.nextRepIndex = 0;
     answer.decisionCase = 0;
     return answer;
   }
@@ -87,9 +89,9 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
 
   // [冷启动保护] 如果历史传输记录少于 20 个，数据不足以做复杂计算，保持最低码率
   // v2 选择中等画质 同时激进一点，改为 3个
-  if (m_throughput.transmissionEnd.size() < 3) {
-    // answer.nextRepIndex = 0;
-    answer.nextRepIndex = 3;
+  if (m_throughput.transmissionEnd.size() < 20) {
+    answer.nextRepIndex = 0;
+    // answer.nextRepIndex = 3;
     answer.decisionCase = 1;
     return answer;
   }
@@ -97,7 +99,7 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
   // --- 步骤 1: 带宽估算 (使用调和平均数) ---
   std::vector<double> thrptEstimationTmp;
   // 遍历过去的历史数据（倒序遍历）
-  for (unsigned sd = m_playbackData.playbackIndex.size(); sd-- > 0;) {
+  for (unsigned sd = m_playbackData.playbackIndex.size() - 1; sd-- > 0;) {
     if (m_throughput.bytesReceived.at(sd) == 0) {
       continue;
     } else {
@@ -114,7 +116,7 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
       break;
     }
   }
-
+  NS_LOG_INFO("带宽估算结果:  Mbps");
   // 计算调和平均数 (Harmonic Mean)
   // 调和平均数对“低值”敏感。如果某次网络很卡，平均值会大幅下降。这是一种保守策略。
   double harmonicMeanDenominator = 0;
@@ -146,10 +148,11 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
 
   // [降级判断 - Panic Mode]
   // 如果当前码率的比特率 > 估算带宽 * 0.85，说明网速不够了，必须降级
+  NS_LOG_INFO("currentRepIndex" << currentRepIndex);
   if (currentRepIndex > 0 && m_videoData.averageBitrate.at(currentRepIndex) >
                                  thrptEstimation * m_thrptThrsh) {
     refIndex = currentRepIndex - 1;  // 降一级
-    answer.decisionCase = 1;
+    answer.decisionCase = 2;
     decisionMade = true;
   }
 
@@ -176,7 +179,7 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
         (double)m_videoData.averageBitrate.at(currentRepIndex + 1) <=
             thrptEstimation) {
       refIndex = currentRepIndex + 1;  // 升一级
-      answer.decisionCase = 1;
+      answer.decisionCase = 3;
       decisionMade = true;
     }
   }
@@ -184,7 +187,7 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
   // 如果既不需要升级也不需要降级，直接返回维持现状
   if (!decisionMade) {
     answer.nextRepIndex = currentRepIndex;
-    answer.decisionCase = 3;
+    answer.decisionCase = 4;
     return answer;
   }
 
@@ -236,7 +239,7 @@ FestiveAlgorithm::GetNextRep(const int64_t segmentCounter, int64_t clientId) {
       scoreStabilityRef + m_alpha * scoreEfficiencyRef) {
     answer.nextRepIndex =
         currentRepIndex;  // 哪怕前面想切，因为成本太高，最后决定【反悔】，保持不变
-    answer.decisionCase = 4;
+    answer.decisionCase = 5;
     return answer;
   } else {
     answer.nextRepIndex = refIndex;  // 确认切换

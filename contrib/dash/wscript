@@ -16,6 +16,11 @@ def build(bld):
         'model/multi-av-stream-client.cc',
         'model/multi-av-stream-server.cc',
         'helper/multi-av-stream-helper.cc',
+        'model/shared-bottleneck-detection.cc',
+        'model/sabba.cc',
+        'model/mptcp-sbd.cc',
+        'model/sb-cc.cc',
+        'model/abr.cc',
         ]
 
     headers = bld(features='ns3header')
@@ -34,6 +39,14 @@ def build(bld):
         'model/multi-av-stream-client.h',
         'model/multi-av-stream-server.h',
         'helper/multi-av-stream-helper.h',
+        'model/shared-bottleneck-detection.h',
+        'model/rtt.h',
+        'model/sabba.h',
+        'model/flowtag.h',
+        'model/mptcp-sbd.h',
+        'model/OwdManager.h',
+        'model/sb-cc.h',
+        'model/abr.h',
         ]
 
     if bld.env['ENABLE_EXAMPLES']:
